@@ -1,0 +1,49 @@
+---
+title: "Monty Hall game"
+output: html_document
+---
+
+In the 1970s, there was a game show called “Let’s Make a Deal” and Monty Hall was the host. At some point in the game, contestants were asked to pick one of three doors. Behind one door there was a prize. The other doors had a goat behind them to show the contestant they had lost. After the contestant picked a door, before revealing whether the chosen door contained a prize, Monty Hall would open one of the two remaining doors and show the contestant there was no prize behind that door. Then he would ask “Do you want to switch doors?” What would you do?
+
+
+## The Function takes the number of time the game is played, the output of the function is number of wins and losses depending on the player's strategy, whether they want to switch or remain with their current door of choice
+```{r}
+
+Monty_hall <- function(N_permu = 100){
+  DTRemain <-Montyhall("remain")[1,]
+  DTSwitch <-Montyhall("switch")[1,]
+  while(nrow(DTRemain)<N_permu){
+    DTRemain <- rbind(DTRemain, Montyhall("remain"))
+  
+    DTRemain[which(DTRemain[,prize=="car"])] ## Data table only containing the winners "car"
+  }
+
+  while(nrow(DTSwitch)<N_permu){
+    DTSwitch <- rbind(DTSwitch, Montyhall("switch"))
+  
+    DTSwitch[which(DTSwitch[,prize == "car"])] ## Data table only containing the winners "car"
+  }
+  
+strategy_dt <- data.table(sum(DTSwitch[,prize == "car"]),
+                            sum(DTSwitch[,prize == "goat"]),
+                              sum(DTRemain[,prize == "car"]), 
+                                sum(DTRemain[,prize == "goat"]))
+
+colnames(strategy_dt) <- c("Switch_wins","Switch_losses" ,"Remain_wins", "Remain_losses")
+
+forplot <-separate(melt(strategy_dt, variable.name = "Strategy", 
+                        value.name = "result" ),
+                          1,
+                            into = c("strategy", "outcome") ,
+                              sep = "_", remove = T)
+
+ggplot(forplot, aes(strategy, result, fill = outcome))+
+  geom_bar(stat = "identity", position = "dodge")
+  
+}
+
+
+Monty_hall(1009)
+```
+## Results
+- There's a dominant strategy which is "Switch" always switching would result in a higher chances of winning the game, switching is the best strategy since it incorprates the information that Monty always chooses a loosing door, a door with a goat lying behind :) This is good representation of bayesian inference and how new information would affect decisions \
