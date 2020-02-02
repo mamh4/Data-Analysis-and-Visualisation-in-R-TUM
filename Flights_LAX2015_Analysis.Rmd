@@ -1,0 +1,1502 @@
+---
+title: "Case Study I"
+output:
+  pdf_document: default
+  html_document: default
+---
+### Installing the Packages
+```{r}
+#Packages
+library(data.table) 
+library(magrittr) # Needed for %>% operator 
+library(tidyr) 
+library(readxl) 
+library(dplyr)
+library(ggbeeswarm) 
+library(ggplot2)
+library(ggrepel)
+library(pals)
+library(grid)
+library("gridExtra")
+```
+
+### Reading the files
+```{r}
+#Reading files
+flights <- fread("flightsLAX.csv") %>% as.data.table()
+head(flights)
+airlines <- fread("airlines.csv")
+head(airlines)
+airports <- fread("airports.csv")
+head(airports)
+
+```
+
+## Column Explanations of flightsLAX:
+We have 389369 observations of 31 variables
+
+Since the columnnames of the datafiles Airlines and Airports are self explaining, the following lines only show the explanaition of the datafile flightsLAX.
+
+YEAR: Year of the Flight Trip
+MONTH: Month of the Flight Trip
+DAY: Day of the Flight Trip
+DAY_OF_WEEK: Day of week of the Flight Trip
+AIRLINE: Airline Identifier
+FLIGHT_NUMBER: Flight Identifier
+TAIL_NUMBER: Aircraft Identifier
+ORIGIN_AIRPORT: Starting Airport
+DESTINATION_AIRPORT: Destination Airport
+SCHEDULED_DEPARTURE: Planned Departure Time
+DEPARTURE_TIME: WHEEL_OFF - TAXI_OUT
+DEPARTURE_DELAY: Total Delay on Departure
+TAXI_OUT: The time duration elapsed between departure from the origin airport gate and wheels off
+WHEELS_OFF: The time point that the aircraft's wheels leave the ground
+SCHEDULED_TIME: Planned time amount needed for the flight trip
+ELAPSED_TIME: AIR_TIME+TAXI_IN+TAXI_OUT
+AIR_TIME: The time duration between wheels_off and wheels_on time
+DISTANCE: Distance between two airports
+WHEELS_ON: The time point that the aircraft's wheels touch on the ground
+TAXI_IN: The time duration elapsed between wheels-on and gate arrival at the destination airport
+SCHEDULED_ARRIVAL: Planned arrival time
+ARRIVAL_TIME: WHEELS_ON+TAXI_IN
+ARRIVAL_DELAY: ARRIVAL_TIME-SCHEDULED_ARRIVAL
+DIVERTED: Aircraft landed on airport that out of schedule
+CANCELLED: Flight Cancelled (1 = cancelled)
+CANCELLATION_REASON: Reason for Cancellation of flight: A - Airline/Carrier; B - Weather; C - National Air System; D - Security
+AIR_SYSTEM_DELAY: Delay caused by air system
+SECURITY_DELAY: Delay caused by security
+AIRLINE_DELAY: Delay caused by the airline
+LATE_AIRCRAFT_DELAY: Delay caused by aircraft 
+WEATHER_DELAY: Delay caused by weather
+
+## Loading the data II
+
+In the following lines the necessary datatables are being loaded.
+```{r}
+lax_file <- file.path('flightsLAX.csv')
+lax_dt <- read.csv(lax_file)
+lax_dt <- as.data.table(lax_dt)
+airlines_file <- file.path('airlines.csv')
+airports_file <- file.path('airports.csv')
+airlines_dt <- read.csv(airlines_file)
+airlines_dt <- as.data.table(airlines_dt)
+airports_dt <- read.csv(airports_file)
+airports_dt <- as.data.table(airports_dt)
+```
+
+### Overview Analysis
+The following section will give a short overview of the data. Starting with summary statistics and tables of the flightLAX data and continues with some histogramms visualizing the frequencies of different data entries.
+
+```{r}
+summary_cols <- c("AIRLINE", "ORIGIN_AIRPORT", "DESTINATION_AIRPORT", "DEPARTURE_DELAY", "TAXI_OUT", "WHEELS_OFF", "AIR_TIME", "DISTANCE", "WHEELS_ON", "TAXI_IN", "ARRIVAL_DELAY", "DIVERTED", "CANCELLED", "CANCELLATION_REASON", "AIR_SYSTEM_DELAY", "SECURITY_DELAY", "AIRLINE_DELAY", "LATE_AIRCRAFT_DELAY", "WEATHER_DELAY")
+summary(lax_dt[, ..summary_cols])
+table(lax_dt[, DIVERTED])[2]/389369
+table(lax_dt[, CANCELLED])[2]/389369
+table(lax_dt[,CANCELLATION_REASON])
+```
+
+Results: 
+* TAXI_OUT takes in mean a lot longer than TAXI_IN
+* WHEELS_OFF takes in mean less long than WHEELS_ON
+* If delay, then the late_aircraft delay is in mean the one that takes the longest
+* About 0.2 % of all flights have been Diverted, about 1% of all flights have been cancelled
+* Different Cancelation Reasons (Mostly A, then B, then C)
+
+```{r lax_dt, echo=FALSE}
+hist(lax_dt$DEPARTURE_DELAY, main = 'Histogramm of Departure Delay', xlab='Time')
+hist(lax_dt$TAXI_OUT, main = 'Histogramm of Taxi Out Time', xlab='Time')
+hist(lax_dt$TAXI_IN, main = 'Histogramm of Taxi In Time', xlab='Time')
+hist(lax_dt$WHEELS_OFF, main = 'Histogramm of Wheels Off Time', xlab='Time')
+hist(lax_dt$WHEELS_ON, main = 'Histogramm of Wheels On Time', xlab='Time')
+hist(lax_dt$DISTANCE, main = 'Histogramm of Distance', xlab='Distance')
+hist(lax_dt$AIR_TIME, main = 'Histogramm of Air Time', xlab='Time')
+hist(lax_dt$ARRIVAL_DELAY, main = 'Histogramm of Arrival Delay', xlab='Time')
+```
+
+
+### Consolidating all data
+```{r}
+# Consolidating data
+flightsandairlines <- merge(flights, airlines, by.x = "AIRLINE", by.y = "IATA_CODE", sort = FALSE)
+flightsandairlinesandairports <- merge(flightsandairlines, airports, by.x = "ORIGIN_AIRPORT" , by.y = "IATA_CODE", sort = F)
+## A comprehensive table Flights, Airlines, Airports Complete
+FAAC <- merge(flightsandairlinesandairports, airports, by.x = "DESTINATION_AIRPORT" , by.y = "IATA_CODE", sort = F)
+```
+
+
+
+### Tidying up
+```{r}
+## Tidying up 
+#deleting redundant columns
+FAAC[, DESTINATION_AIRPORT := NULL]# Repaced by AIRPORT.y
+FAAC[, ORIGIN_AIRPORT := NULL]# Replaced by AIRPORT.x
+FAAC[, AIRLINE := NULL]# Replaced by AIRLINE.y
+FAAC[, COUNTRY.x := NULL]
+FAAC[, COUNTRY.y := NULL]
+
+#Renaming for readibility
+setnames(FAAC, "AIRLINE.y", "AIRLINE")
+setnames(FAAC, "AIRPORT.x", "ORIGIN_AIRPORT")
+setnames(FAAC, "AIRPORT.y", "DESTINATION_AIRPORT")
+setnames(FAAC, "STATE.x", "ORIGIN_STATE")
+setnames(FAAC, "STATE.y", "DESTINATION_STATE")
+setnames(FAAC, "CITY.x", "ORIGIN_CITY")
+setnames(FAAC, "CITY.y", "DESTINATION_CITY")
+setnames(FAAC, "LATITUDE.x", "LATITUDE_ORIGIN")
+setnames(FAAC, "LATITUDE.y", "LATITUDE_DESTINATION")
+setnames(FAAC, "LONGITUDE.x", "LONGITUDE_ORIGIN")
+setnames(FAAC, "LONGITUDE.y", "LONGITUDE_DESTINATION")
+
+```
+
+### Creating our final table
+```{r}
+# Tidying 2
+#Replacing state appreviations with state names for readibilty
+
+#First we create a table that would be as a lookup table
+
+abb_states <- data.table(state.abb)
+abbAndnames_states <- abb_states[, ':=' ("state.name" = state.name)]
+abbAndnames_states## Now we have our lookup table
+
+# Add state names twice, for origin and destination
+FAAC1 <- merge(FAAC, abbAndnames_states, by.x = "ORIGIN_STATE", by.y = "state.abb")
+
+flights_fulll <- merge(FAAC1, abbAndnames_states, by.x = "DESTINATION_STATE", by.y = "state.abb")
+
+# Removing the old abbreviated columns and adding the new fullnamed ones
+flights_fulll[, DESTINATION_STATE := NULL]
+flights_fulll[, ORIGIN_STATE := NULL]
+
+setnames(flights_fulll, "state.name.x", "ORIGIN_STATE")
+setnames(flights_fulll, "state.name.y", "DESTINATION_STATE")
+# Add Velocity Column
+flights_full <- flights_fulll[, VELOCITY := DISTANCE / (AIR_TIME/60)]
+head(flights_full)
+```
+
+
+### List of Airports
+
+```{r}
+# To which airports do flights from LA fly to? and how many are they in total? According to the Bureau of transportation statistics US has total of 5087 airports ;)
+as.data.table(unique(flights_full[,DESTINATION_AIRPORT]))
+
+# From which airports do flights from LA come from? and how many are they in total?
+as.data.table(unique(flights_full[,ORIGIN_AIRPORT]))
+
+```
+
+
+### Airport Busyness
+```{r}
+# Airport busyness per month
+help_34 <- flights_full[,.N, by = MONTH]
+
+# For the plot we specify the month names
+date_vector <- c(1,2,3,4,5,6,7,8,9,10,11,12)
+names(date_vector) <- c("Jan", "Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct*","Nov","Dec")
+
+# A nice bar plot :)
+ggplot(help_34, aes(MONTH, N)) +
+  geom_bar(stat = "identity") +
+  scale_x_continuous(breaks = date_vector) +
+labs(title="Number of Flights to and from LA per month (Airport Busy-ness)", x="Month", y="Number of Flights")
+
+```
+Results
+* High peak between July and September
+* Lowest peak during February
+* No data for October
+
+### Number of flights to LA
+```{r}
+# Number of flights to LA
+flights_full[,.N, by = c("DESTINATION_AIRPORT")]
+```
+### List of Airlines
+
+```{r}
+# Number of Airlines
+as.list(unique(flights_full[,AIRLINE]))
+
+```
+
+### Number of Flights per Airline
+```{r}
+# Number of flights per airline
+help_1 <-flights_full[, .N, by = AIRLINE]
+ggplot(help_1, aes(AIRLINE, N)) +
+  geom_bar(stat = 'identity') +
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_y_continuous(limits = c(0,80000)) +
+  geom_text(aes(label = N ), vjust=-0.25) 
+```
+Results:
+
+Lowest number of flights 
+* American Eagle: Super small
+* and then between 1000 and 5000: Frontier, Hawawiian
+* between 5000 and 10000: Spirit, JetBlue and US Airways
+
+Mid Range
+* Between 10000 and 25000: Alaska Airlines and virgin America
+* Between 40,000 and 60,000: Delta, America and United Airlines
+
+Highest number of flights: Skywest and Southwest airlines
+
+
+## Mean delay per Airline Arrival vs Departure
+```{r}
+# Calculating the mean Delay per airline
+# Creating our tables
+help_2 <- flights_full[, .(DEPARTURE_DELAY, ARRIVAL_DELAY), by = AIRLINE]
+# Creating two delay measurements
+help_2 <- help_2[, SUM_DELAY:= DEPARTURE_DELAY + ARRIVAL_DELAY]
+help_2 <- help_2[, SUM_ABSOLUTE_DELAY := abs(help_2[,DEPARTURE_DELAY]) + abs(help_2[,ARRIVAL_DELAY])]
+# Moving on with our tables
+help_3 <- help_2[, .(MEAN_ABSOLUTE_DELAY = mean(SUM_ABSOLUTE_DELAY, na.rm = T), MEAN_DELAY = mean(SUM_DELAY, na.rm = T)),by = AIRLINE]
+help_4 <- melt(help_3, id.vars = c("AIRLINE"))
+
+
+help_32 <- flights_full[, .(MEAN_DEPARTURE_DELAY = mean(DEPARTURE_DELAY, na.rm = T), MEAN_ARRIVAL_DELAY = mean(ARRIVAL_DELAY, na.rm = T)), by = AIRLINE]
+help_33 <- melt(help_32)
+
+ggplot(help_33, aes(AIRLINE, value, fill = variable)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title="The mean delay per airline in mins" , y= "Mean delay ") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  geom_text(aes(label = round(value)), vjust= 0, hjust = 1)
+  
+
+### Difference is probably because flights maybe try to hurry up to compensate delays? Peter hits in :D
+
+```
+
+## Exploring ARRIVAL DELAYS
+Assuming that Arrival delays are more undesired compared to Departure delays
+```{r}
+# same plot as above but arrival delay 
+# with -ve delays
+help_14 <- flights_full[, ARRIVAL_DELAY, by = AIRLINE] 
+help_15 <- help_14[, mean(ARRIVAL_DELAY, na.rm = T), by = AIRLINE]
+# without -ve delays
+help_16 <- flights_full[, ARRIVAL_DELAY, by = AIRLINE] %>% filter(ARRIVAL_DELAY > 0) %>% as.data.table
+help_17 <- help_16[, mean(ARRIVAL_DELAY, na.rm = T), by = AIRLINE]
+
+ggplot(help_15, aes(AIRLINE, V1)) +
+  geom_bar(stat = "identity") +
+  labs(title="Mean Arrival Delay Per Airline" , y= "mean delay") +
+  theme(axis.text.x = element_text(angle = 90)) +
+    scale_y_continuous(breaks =c(0,10,20,30,40,50,60) ,limits = c(-5,60))
+
+ggplot(help_17, aes(AIRLINE, V1)) +
+  geom_bar(stat = "identity") +
+  labs(title="Mean Arrival Delay Per Airline Excluding Early Arrivals" , y= "mean delay") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_y_continuous(breaks =c(0,10,20,30,40,50,60) ,limits = c(-5,60))
+
+# want to know the scheduled arrival not departure we here think that it is ok that the flight didn't fly on time as long as they arrived on time
+```
+Result: Spirit Airline has the worst delays (apart from American Eagle Airlines, but that one hasn't got enough data to be analysed properly).
+
+### Exploring Spirit Airline
+```{r}
+## Explorying Spirit Airline Arrival delays
+SpiritAirLine <- filter(flights_full, AIRLINE == "Spirit Air Lines")
+
+## Excluding delays above 15 mins (nonsignificant delays)>Subjective
+help_18 <- filter(SpiritAirLine, ARRIVAL_DELAY > 15) %>% as.data.table
+
+
+## Delays per flight time
+
+help_19 <- help_18[, .(Mean_Delay = mean(ARRIVAL_DELAY, na.rm = T), N = .N), by = SCHEDULED_ARRIVAL] %>% as.data.table
+
+help_20 <- help_19[, WEIGHT_DELAY := help_19[,2] * help_19[, 3]]
+help_21 <- help_20[, DELAY_CONTRIBUTION := help_20[, abs(WEIGHT_DELAY)] / help_20[,abs(sum(WEIGHT_DELAY))] * 100]
+
+ggplot(help_20, aes(SCHEDULED_ARRIVAL, DELAY_CONTRIBUTION, na.rm = T)) +
+  geom_line(stat = 'identity', na.rm = T) +
+  scale_x_continuous(breaks = c(0001,0300,0600 ,0900 ,1200, 1500, 1800, 2100, 2359), limits = c(0100,2359)) +
+  labs(title="Flight Contribution to Delays (Daytime)", x="Time", y="%")
+
+## Delays per Month time
+help_22 <- help_18[, .(N = .N, Mean_Delay = mean(ARRIVAL_DELAY)), by = MONTH]
+help_23 <- help_22[, WEIGHT_DELAY := help_22[,2] * help_22[, 3]]
+help_24 <- help_23[, DELAY_CONTRIBUTION := help_23[, abs(WEIGHT_DELAY)] / help_23[,abs(sum(WEIGHT_DELAY))] * 100]
+ggplot(help_24, aes(MONTH, DELAY_CONTRIBUTION)) +
+  geom_line(stat = "identity") +
+  scale_x_continuous(breaks = date_vector) +
+  labs(title="Flight Contribution to Delays (Months)", x="Month", y="%") +
+  scale_y_continuous(limits = c(0,19))
+
+## Per day of the week
+help_25 <- help_18[, .(N = .N, Mean_Delay = mean(ARRIVAL_DELAY)), by = DAY_OF_WEEK]
+help_26 <- help_25[, WEIGHT_DELAY := help_25[,2] * help_25[, 3]]
+help_27 <- help_26[, DELAY_CONTRIBUTION := help_26[, abs(WEIGHT_DELAY)] / help_26[,abs(sum(WEIGHT_DELAY))] * 100]
+
+week_days <- c(1,2,3,4,5,6,7)
+names(week_days) <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+ggplot(help_26, aes(DAY_OF_WEEK, DELAY_CONTRIBUTION)) +
+  geom_line(stat = "identity") +
+  scale_x_continuous(breaks = week_days) +
+  labs(title="Flight Contribution to Delays (Week days)", x="Day", y="%") +
+  scale_y_continuous(limits = c(0,19))
+
+## Probabilites
+
+#1) Probability of significant delays for Spirit Airline where we identify significant as more than 15 mins
+SpiritAirLine #[8688]
+help_29 <- filter(SpiritAirLine, ARRIVAL_DELAY > 15) #[2972]
+# 2972 / 8688 = 0.3420
+
+#2) Probability of delays in June
+help_30 <- filter(SpiritAirLine, MONTH == 6) ## 780
+help_31 <- filter(help_29, MONTH == 6) ## 401
+# 401 / 780 = 0.5154
+
+#3) probability of delays on Monday
+help_35 <- filter(help_29, DAY_OF_WEEK == 1) ## 487
+help_39 <- filter(SpiritAirLine, DAY_OF_WEEK ==1) ##1258
+# 487 / 1257 = 0.3874
+
+#4) probability of delays on last quarter of the day
+help_36 <- filter(help_29, SCHEDULED_ARRIVAL > 1800) ## 1186
+help_40 <- filter(SpiritAirLine, SCHEDULED_ARRIVAL > 1800) #2302
+# 1186 / 2302 = 0.5152
+
+
+#5) probability of delays in June, on a Monday
+help_37 <- filter(help_31, DAY_OF_WEEK == 1) ##65
+help_41 <- filter(help_30, DAY_OF_WEEK == 1) ## 130
+# 65 / 130 = 0.5 INTERESTING Mondays in June are not that bad!
+
+
+
+
+#6) probability of delay in June on a Monday the last quarter of the day
+help_38 <- filter(help_37, SCHEDULED_ARRIVAL > 1800) ##25
+help_42 <- filter(help_41, SCHEDULED_ARRIVAL > 1800) ##38
+# 25/ 38 = 0.6578
+
+
+# I was expecting to have a higher proabability for the last one but turns out that Mondays were not that bad in June
+# Contribution of Delays in June on Monday (Further Exploration)
+help_45 <- help_18[, .(N = .N, Mean_Delay = mean(ARRIVAL_DELAY)), by = DAY]
+help_46 <- help_45[, WEIGHT_DELAY := help_45[,2] * help_45[, 3]]
+help_47 <- help_46[, DELAY_CONTRIBUTION := help_46[, abs(WEIGHT_DELAY)] / help_46[,abs(sum(WEIGHT_DELAY))] * 100] # Plot at the end of the chunck!
+
+
+# A probability plot
+factorXX <- c("Probability of delay", "Probability of delay in June", "Probability of delay on Monday", "Probability of delay in the last qaurter of the day", "Probability of delay in J on M" , "Prob of delay in J on M in last Q")
+prob <- c(0.3420, 0.5154, 0.3874, 0.5152, 0.5, 0.6578)
+Prob_Plot <- data.table(factorXX, prob)
+ggplot(Prob_Plot, aes(x = reorder(factorXX, -prob), prob)) +
+  geom_bar(stat = "identity", color = "darkred") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_y_continuous(limits = c(0,1)) +
+  labs(title = "Statistics on Spirit Air Lines", y = "Probability")
+
+#Exploring June and Mondays :D
+Days_Vector_ <- (1:31)
+names(Days_Vector_) <- rep(names(week_days), length.out = length(Days_Vector_))
+ggplot(help_47, aes(DAY, DELAY_CONTRIBUTION)) +
+  geom_line() +
+  scale_x_continuous(breaks = Days_Vector_ ) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title="Flight Contribution to Delays (June)", x="June", y="%")
+
+```
+Results:
+* Peak time in terms of delay is during the last quarter of the day
+* Monday is the worst week day in terms of contributing to delays
+* June is the worst Month in terms of contributing to delays
+* Mondays in June were not bad in terms of delays
+probabilities
+* Probability of delay for Spirit Air Lines                                            0.3420
+* Probability of delays in June                                                        0.5154
+* Probability of delays on Monday                                                      0.3874
+* Probability of delays in the last quarter of the day                                 0.5152
+* Probability of delays on Monday in June                                              0.5
+* Probability of delays on Monday in June in the last qaurter of the day               0.6578
+
+### Mean taxi in statistics
+```{r}
+#The time duration elapsed between wheels-on and gate arrival at the destination airport
+flights_full[, sum(TAXI_IN, na.rm = T), by = AIRLINE]
+flights_full[, sum(mean(TAXI_IN, na.rm = T), na.rm = T), by = AIRLINE]
+
+ggplot(flights_full[, sum(mean(TAXI_IN, na.rm = T), na.rm = T), by = AIRLINE], aes(AIRLINE, V1)) +
+  geom_bar(stat = 'identity') + 
+  labs(y="Mean TAXI_IN")+ theme(axis.text.x = element_text(angle = 90)) 
+```
+
+```{r}
+# distance and Taxi in 
+ggplot(flights_full, aes(DISTANCE, TAXI_IN)) +
+       geom_point(na.rm = T)
+flights_full[,cor(DISTANCE, TAXI_IN, use = "pairwise.complete.obs")] # No correlation
+
+```
+Result: Low correlation coefficient of 0.1019458 of the relationship between distance and taxi in. 
+
+
+```{r}
+# Velocity and Taxi in
+ggplot(flights_full, aes(VELOCITY, TAXI_IN)) +
+       geom_point(na.rm = T)
+flights_full[,cor(VELOCITY, TAXI_IN, use = "pairwise.complete.obs")] # no correlation NO NEED TO NARROW DOWN SEARCH TO MEAN PER AIRLINE OR SO
+```
+Result: Really low correlation coefficient of 0.04589247 of the relationship between velocity and taxi in.
+
+
+### Velocity and departure delay analysis
+```{r}
+# Velocity and departure delay
+flights_full[,cor(VELOCITY, DEPARTURE_DELAY, use = "pairwise.complete.obs")]
+
+```
+Result: Really low correlation coefficient of 0.02055152 of the relationship between velocity and departure delay.
+
+### Velocity and month analysis
+```{r}
+#Funny? no
+## Analysing mean velocity across months
+#Without adding zero
+ggplot((flights_full[, mean(VELOCITY, na.rm = T), by = MONTH]), aes(MONTH, V1)) +
+  geom_line() +
+  scale_x_continuous(breaks = date_vector) + 
+   labs(title="Mean velocity of all airlines per month", y="Velocity")+theme()+theme()
+#With adding zero
+ggplot((flights_full[, mean(VELOCITY, na.rm = T), by = DAY]), aes(DAY, V1)) +
+  geom_line() +
+  scale_y_continuous(limits = c(0,500)) +
+  scale_x_continuous() + 
+  labs(title="Mean velocity of all airlines per month", y="Velocity")+theme() # different Scale different perspective ;)
+```
+
+## Analysis of Airlines
+
+Created some helping subdata tables. 
+
+```{r}
+old_flights <- copy(flights)
+flights <- unite(flights,col=DATE, YEAR,MONTH,DAY,sep = '/')
+flights[order(as.Date(DATE, format="%Y/%m/%d"))]
+options(max.print=1000000)
+View(flights)
+miniflights <- flights[,.(DATE,DAY_OF_WEEK,AIRLINE,DEPARTURE_DELAY,TAXI_OUT,AIR_TIME,DISTANCE,TAXI_IN,ARRIVAL_DELAY)]
+miniflights <- copy(miniflights)
+miniflights <- na.omit(miniflights)
+miniflights[,TOTAL_TIME := TAXI_OUT + TAXI_IN + AIR_TIME]
+supervektor <- rep(0, length(miniflights[,DISTANCE]))
+supervektor[1] <- 1
+for(i in 2:length(supervektor)) {
+  if( miniflights$DATE[i] == miniflights$DATE[i-1]) {
+    supervektor[i] <- supervektor[i-1]
+  } else {
+    supervektor[i] <- supervektor[i-1] + 1
+  }
+}
+miniflights[317887]
+supervektor[317887:length(supervektor)] <- supervektor[317887:length(supervektor)] + 31
+miniflights[, DAY := supervektor]
+View(miniflights)
+
+ggplot
+
+```
+
+And now, the visualisation and analysis can begin... \
+
+### General investigations 
+Here, we do some first idea analysis. \
+• First two graphs illustrate the delays (general and by airline) up to 300 mins. \
+• 3rd and last graph illustrate total number of flights and destinations, respectively, of particular airlines. \
+• The barplots show distribution of delays by airline, first without y axis limitation, then with. 
+
+
+```{r}
+ggplot(miniflights[ARRIVAL_DELAY < 300], aes(ARRIVAL_DELAY)) + geom_histogram(bins = 40)
+ggplot(miniflights[ARRIVAL_DELAY < 300], aes(ARRIVAL_DELAY)) + geom_histogram() + facet_wrap(~AIRLINE)
+num_of_flights <- table(miniflights$AIRLINE)
+barplot(num_of_flights)
+View(flights[AIRLINE == 'MQ'])
+
+ggplot(miniflights, aes(AIRLINE,ARRIVAL_DELAY)) + geom_boxplot()
+ggplot(miniflights, aes(AIRLINE,ARRIVAL_DELAY)) + geom_boxplot() + ylim(-100,100)
+barplot(table(unique(flights[,ORIGIN_AIRPORT, by=AIRLINE])$AIRLINE))
+airports[IATA_CODE %in% unique(flights[,ORIGIN_AIRPORT, by=AIRLINE])[AIRLINE=='HA']$ORIGIN_AIRPORT,CITY]
+airports[IATA_CODE %in% unique(flights[,ORIGIN_AIRPORT, by=AIRLINE])[AIRLINE=='UA']$ORIGIN_AIRPORT,CITY]
+airports[IATA_CODE %in% unique(flights[,ORIGIN_AIRPORT, by=AIRLINE])[AIRLINE=='B6']$ORIGIN_AIRPORT,CITY]
+```
+From these graphs, we can see: \
+• Most of the delays are just mild (up to 30 mins) and even many of flights arrived sooner, than scheduled. \
+• The differences between airlines are not apparent, however we can see the significant diffenrences in the number of flights, as well as destinations. 
+• There are huge delay outliers among the flights. The largest ones belong to American Airlines, with values exceeding one day! :O 
+• Most of the airlines have negative delay median - majority of flights arrived sooner. Spirit Air Lines slightly worse than others. 
+
+
+
+## Dependency of velocity from time
+Here, we analysed, how speed depends on time. Plotted is average velocity per day against the day in the year. 
+```{r}
+helping <- miniflights[,.(AVG_VELOCITY = mean(DISTANCE/AIR_TIME*60)), by = DAY]
+ggplot(helping, aes(DAY,AVG_VELOCITY)) + geom_point() +
+  scale_x_continuous(breaks = seq(1:365,)) + 
+  labs(title="Mean velocity of all airlines per month", y="Velocity")+theme() # different Scale different perspective ;)
+
+ggplot(helping, aes(DAY,AVG_VELOCITY)) + geom_line()
+vysledocek1  <- lm(helping$AVG_VELOCITY ~ helping$DAY)
+summary(vysledocek1)
+
+means <- old_flights[, mean(DISTANCE, na.rm=TRUE), by=MONTH]
+ggplot(means, aes(MONTH, V1)) + geom_point() + labs(y = 'MEAN DISTANCE') + scale_x_continuous(breaks = 
+date_vector)
+
+```
+
+From these graphs, we can deduce two major things: \
+1. There is no data provided in october. \
+2. The velocity statistically significantly increases w.r.t time. However, the total increase accounts for just 20 km or miles per hour. \ \
+
+### Dependency of velocity according to airline and airline distance
+In the following, we investigate the relationship between average velocity per airline and compare it to the average distance, that airline flies. \
+• On the first graph, relationship between average velocity and airline is plotted. Blue dots represent scaled average distances of each airline, with the same mean and standard deviation as velocity points. \
+• The second graph plots average velocity vs. average distance of each airline.
+• The third graph plots airline distance scaled by its velocity, according to airline. 
+
+```{r}
+helping2 <- miniflights[,.(AVG_VELOCITY = mean(DISTANCE/AIR_TIME*60), SD_VELOCITY = sd(DISTANCE/AIR_TIME*60)), by = AIRLINE]
+dist_airline <- flights[,.(mean_dist = mean(DISTANCE, na.rm = T)), by = AIRLINE]
+ggplot(helping2, aes(AIRLINE,AVG_VELOCITY)) + geom_point() + geom_errorbar(aes(ymin = AVG_VELOCITY-SD_VELOCITY, ymax = AVG_VELOCITY+SD_VELOCITY), width = 0.3) + geom_point(data = dist_airline, aes(AIRLINE, ((mean_dist-mean(mean_dist))/sd(mean_dist)*sd(helping2$AVG_VELOCITY)+mean(mean_dist))*mean(helping2$AVG_VELOCITY)/mean(mean_dist)),color = 'blue')
+cor(helping2$AVG_VELOCITY,dist_airline$mean_dist)
+helping3 <- as.data.table(list(airline = dist_airline$AIRLINE, airline_distance = dist_airline$mean_dist, airline_velocity = helping2$AVG_VELOCITY))
+ggplot(helping3, aes(airline_distance,airline_velocity)) + geom_point() + geom_text(aes(label=airline), vjust = 1.5)
+ggplot(helping3, aes(airline,airline_distance/airline_velocity)) + geom_point()
+helping4 <- flights[AIRLINE == 'OO', .(ORIGIN_AIRPORT,DESTINATION_AIRPORT)]
+OO_dest <- c(as.vector(helping4$ORIGIN_AIRPORT),as.vector(helping4$DESTINATION_AIRPORT))
+OO_dest <- unique(OO_dest)
+OO_dest_city <- airports[IATA_CODE %in% OO_dest, CITY]
+
+```
+
+From the above, we can infer following observations: \
+• We have direct comparison of the airlines average velocity and distance. \
+• The distance and velocity are stronlgy correlated - higher distance, higher velocity. \
+• Skywest airlines have the far lowest flying distance, as well as velocity. We investigated the cities, where this airline flies and found out, that it flies just to cities, that are close to LA, mostly on the west of USA. 
+
+### The delay dependent on lenght of flight
+Here, we tried to find out, whether distances of the flights influence the delays. \ 
+• First graph just illustrates average distances according to airline. \
+• In the second graph, we see the distributions of arrival delays, while divided into distance bins. \
+• The third graph plots averages of these delays by distance bin and airline. 
+
+```{r}
+helping12 <- flights[,.(AVG_DIST = mean(DISTANCE)), by=AIRLINE]
+ggplot(helping12, aes(AIRLINE,AVG_DIST)) + geom_point()
+justfornextline <- seq(0,1,0.04)
+DIST_BINS <- cut(miniflights$DISTANCE, breaks = unique(quantile(miniflights$DISTANCE,probs = justfornextline)))
+miniflights[,DIST_BINS := DIST_BINS]
+ggplot(miniflights, aes(DIST_BINS,ARRIVAL_DELAY)) + geom_boxplot() + ylim(-100,200)
+avg_del_per_dist_bin <- miniflights[,.(DELAY = mean(ARRIVAL_DELAY)), by = c('AIRLINE','DIST_BINS')]
+avg_del_per_dist_bin <- avg_del_per_dist_bin[order(DELAY)]
+ggplot(avg_del_per_dist_bin, aes(x = DIST_BINS, y = DELAY, colour = AIRLINE)) + geom_point() +scale_color_manual(values=as.vector(alphabet(26)))
+```
+
+• There is no obvious correlation between the flied distance and delay distribution. That means, distance doesn`t have influence on the delay. \
+• However, we can see, that Spirit Air Lines delays dominate most of the distance bins. This is in some sense fair comparison of airlines, because it is done on the same distance levels. 
+
+### Comparison of delays out of LA and to LA, MQ airline investigation, LA vs. Aspen 
+We provide violins for different settings. \
+• The first graph is comparison of distributions of delays of flights from LA (1) and to LA (0), by airlines. \
+• The second graph looks just on the American Eagle Airlines, which fly just between LA and mountain resort - Aspen. \
+• In the third graph, we look just on the Aspen airport.
+
+```{r}
+helping5 <- flights
+helping5[,LAX_origin := as.factor(as.numeric(ORIGIN_AIRPORT=='LAX'))]
+flights[,LAX_origin := helping5$LAX_origin]
+ggplot(helping5, aes(LAX_origin, ARRIVAL_DELAY)) + geom_violin() + facet_wrap(~AIRLINE) + ylim(-50,100)
+MQ_comparison <- flights[AIRLINE=='MQ', .(LAX_origin,ARRIVAL_DELAY)]
+MQ_comparison <- MQ_comparison[!is.na(ARRIVAL_DELAY)]
+ggplot(MQ_comparison, aes(LAX_origin,ARRIVAL_DELAY)) + geom_violin() + ylim(-50,100)
+helping6 <- flights[(ORIGIN_AIRPORT=='ASE') | (DESTINATION_AIRPORT=='ASE')]
+helping7 <- helping6[,.(ORIGIN_AIRPORT,ARRIVAL_DELAY)]
+ggplot(helping7, aes(ORIGIN_AIRPORT,ARRIVAL_DELAY)) + geom_violin() + ylim(-50,200)
+unique(helping6$AIRLINE)
+helping5[ORIGIN_AIRPORT=='ASE' | DESTINATION_AIRPORT=='ASE',mean(ARRIVAL_DELAY,na.rm = T),by=LAX_origin]
+```
+
+• We cannot observe any very obvious differences between incoming and outcoming flights. However, some airlines show slight differences. \
+• Therefore, we looked particularly at the American Eagle Airlines, which reported most different violin plots. We can see, that it is better to fly from Aspen than to fly from LA. \
+• This is also confirmed by the general Aspen-LA delay comparison.
+
+### Comparison of airlines on most frequent destination - Las Vegas
+The following graph compares the airlines, which fly to and from Las Vegas - the destination of most of the airlines. 
+```{r}
+helping8 <- flights[,unique(AIRLINE), by=c('DESTINATION_AIRPORT','ORIGIN_AIRPORT')]
+setnames(helping8,'V1', 'AIRLINES')
+helping8[DESTINATION_AIRPORT=='ASE' & ORIGIN_AIRPORT=='LAX']
+helping8 <- helping8[,length(AIRLINES), by=c('DESTINATION_AIRPORT','ORIGIN_AIRPORT')]
+setnames(helping8,'V1', 'AIRLINES')
+helping8[order(AIRLINES)]
+airports[IATA_CODE == 'LAS']
+helping9 <- flights[(ORIGIN_AIRPORT=='LAS') | (DESTINATION_AIRPORT=='LAS')]
+ggplot(helping9[ARRIVAL_DELAY<=200], aes(AIRLINE, ARRIVAL_DELAY)) + geom_boxplot()
+```
+
+• The findings are similar than in the general case. Most of the airlines' median delays lie below zero. Here, SouthWest Airlines tilt a little bit from the rest. 
+
+### TAXI_OUT and TAXI_in analysis 
+In the following section we look at the TAXI_OUT and TAXI_IN quantities, so the time, the plane spent on the airport between departure and take off and between landing and final arrival. We provide violin graphs for both TAXI_OUT and TAXI_IN, according to whether we fly from (=1) LA or to (=0) LA (LAX_origin). 
+
+```{r}
+ggplot(helping5, aes(LAX_origin,TAXI_OUT)) + geom_violin()
+flights[TAXI_OUT>100]
+flights[,mean(TAXI_OUT,na.rm = T), by=LAX_origin]
+ggplot(helping5, aes(LAX_origin,TAXI_IN)) + geom_violin()
+ggplot(helping5, aes(LAX_origin,TAXI_IN)) + geom_violin() + ylim(0,80)
+sort(as.integer(unique(flights$TAXI_OUT)))
+flights[,mean(TAXI_IN,na.rm = T), by=LAX_origin]
+```
+
+• For TAXI_OUT, it is not very different to fly from LA or from some other destination. Though the violin plots suggest that it could be slightly better to fly to LA, the means are actually in favor of LA. \
+• For TAXI_IN, however, the difference is more visible and it is better to land in other destinations. The average after-landing time in other destinations is just 7 minutes. 
+
+### Departure delay versus arrival delay analysis
+In the following, we examined how the delays change during the flight. More specifically, we examined the change between arrival and departuer delay, what we call "hurry". \
+• The first graph shows, the average hurry per airline - how much the airlines try to lessen their delay during the flight. \
+• The second graph just reflect the same quantity, but uses the whole data, not just the means. 
+
+```{r}
+miniflights[,HURRY := ARRIVAL_DELAY-DEPARTURE_DELAY]
+helping10 <- miniflights[,mean(HURRY), by=AIRLINE]
+setnames(helping10,'V1','AVG_HURRY')
+ggplot(helping10,aes(AIRLINE,AVG_HURRY, fill=AVG_HURRY)) + geom_bar(stat = 'identity')
+ggplot(miniflights, aes(AIRLINE,HURRY)) + geom_violin()
+flights[,HURRY := ARRIVAL_DELAY-DEPARTURE_DELAY]
+flights[HURRY> 200]
+flights[HURRY< -70]
+```
+
+• Every airline has negative hurry, what means, that every flight improved its delay in average. The improvements aren`t radical in the mean, the biggest average hurry is around below -8 minutes. Best airlines are United Air Lines and JetBlue Airways, the worrst is Skywest Airines. \
+• There are some riddiculously large outliers in hurry in our data, both positive and negative. We printed data points with hurry greater than 200 and smaller than -70, to laugh at the taxi_in and taxi_out, and admire the speed of the well-doing flights on the other hand. 
+
+### Investigating flight divertions and cancellations 
+Here, we looked at cancellation and divertion rates of particular airlines. \
+• The first two barplots illustrate cancellation and divertion rate, including the MQ airline. \
+• The last graph compares the divertion and cancellation rates of all but the MQ airlines (to make it nicer). 
+
+```{r}
+helping11 <- flights[,.(CANC_RATE = mean(CANCELLED)),by=AIRLINE]
+ggplot(helping11, aes(AIRLINE,CANC_RATE)) + geom_bar(stat='identity')
+plot3 <- ggplot(helping11[!(AIRLINE=='MQ')], aes(AIRLINE,CANC_RATE)) + geom_bar(stat='identity')
+View(flights[AIRLINE=='MQ'])
+helping13 <- flights[,.(DIV_RATE = mean(DIVERTED)),by=AIRLINE]
+ggplot(helping13, aes(AIRLINE,DIV_RATE)) + geom_bar(stat='identity')
+plot4 <- ggplot(helping13[!(AIRLINE=='MQ')], aes(AIRLINE,DIV_RATE)) + geom_bar(stat='identity')
+grid.arrange(plot3,plot4)
+```
+
+• From the above graphs, we can deduce, that American Eagle Airlines are far worse than others, with cancellation and divertion rate around 7-8%. It is, though, important to say, that this airline has by far the least number of flights, as well as destination airports (just LA and Aspen). As Aspen is a city situated in mountains, the weather is, apparently, not always suitable. \
+• Other airlines perform quite better, some having cancellation rate around 0.2%. \
+• From the last graph, we see that divertion rate is generally higher than cancellation rate and they are not strongly correlated among the airlines. 
+
+### Investigations of delays caused by airlines
+We investigate the delays, that are labelled as caused by airline. \
+• In the first two boxplots, we show the distributions of delays caused by airlines, including all the datapoints, for which delay types are included (not NA). \
+• Then, we just illustrate average such delays. \
+• The following barplot just illustrates number of such included data points per airline. \
+• The next barplot shows delay rate per airline. In other words, the number of nonzero delays reported as caused by airline, divided by the total number of flights of that airline. \
+• The last barplot shows the average delay caused by airline, if we considered all the non-reported delays to be 0.
+
+```{r}
+delay_flights <- flights[!is.na(AIR_SYSTEM_DELAY)]
+summary(delay_flights)
+View(delay_flights)
+ggplot(delay_flights, aes(AIRLINE,AIRLINE_DELAY)) + geom_boxplot()
+ggplot(delay_flights, aes(AIRLINE,AIRLINE_DELAY)) + geom_boxplot() + ylim(0,200)
+helping14 <- delay_flights[,.(AVG_AIRL_DELAY=mean(AIRLINE_DELAY)),by=AIRLINE]
+ggplot(helping14, aes(AIRLINE,AVG_AIRL_DELAY)) + geom_point()
+View(delay_flights[AIRLINE=='HA'])
+barplot(table(delay_flights$AIRLINE))
+helping15 <- flights[,.SD[!(AIRLINE_DELAY==0),.(AIRL_DELAYED =.N)],by=AIRLINE]
+helping16 <- flights[,.(TOTAL_AIRLINE = .N),by=AIRLINE]
+helping17 <- merge(helping15,helping16)
+helping17[,RATIO := AIRL_DELAYED/TOTAL_AIRLINE]
+setnames(helping17, 'RATIO', 'AIRLINE DELAY RATE')
+setnames(helping17, 'AIRLINE DELAY RATE', 'AIRLINE_DELAY_RATE')
+ggplot(helping17, aes(AIRLINE,AIRLINE_DELAY_RATE)) + geom_bar(stat='identity')
+helping18 <- merge(helping17,helping14)
+ggplot(helping18,aes(AIRLINE,AIRLINE_DELAY_RATE*AVG_AIRL_DELAY)) + geom_bar(stat='identity')
+
+```
+
+• From the data, we can infer, that no very significant differences between particular airlines are present. However, Hawaiian airlines are worst in this case, with rather visible difference. \
+• Many airlines (namely AA,AS,F9,MQ,OO and VX) have zero median of reported delay, what means, that in most cases, the delay is not caused by them. \
+• Looking at the mean graph, we can see, that since American Eagle Airlines airline has so low number of flights, it is hard to see, that it is actually not so good from the boxplots. \
+• Finally, we also looked at delay rates per airline. We can see, that in one fifth of cases, you would be late due to airline, if you travelled with Spirit Air Lines. Most of the airlines have, though, high delay rate too. By far best performing airline in this matter is Alaska Airlines airline. \
+• The last graph shows quite fair comparison of delays, where we don't take into consideration just delays itself, but we combine them with delay rate - we can see, that Hawaii Airlines stay to be the worst one, while American Eagle gets quite better. Alaska Airlines remains to be the best one. 
+
+
+
+## Destination / Origin Analysis
+This section aims to analyse the destination and origin airports. 
+
+### Frequency Analysis of Destination / Origin
+The following lines do some basic analysis considering the destination and the origin airports.
+
+```{r lax_dt, echo=FALSE}
+# Destination Counts
+dest_count <- as.data.table(table(lax_dt$DESTINATION_AIRPORT))
+dest_count
+hist(dest_count[V1!='LAX']$N, main="Count of Flights to Destinations (excluding LAX)", xlab="Number of Flights heading to a Destination")
+# Origin Counts
+origin_count <- as.data.table(table(lax_dt$ORIGIN_AIRPORT))
+hist(origin_count[V1!='LAX']$N, main="Count of Flights coming from Origin (excluding LAX)", xlab="Number of Flights coming from a Origin")
+# for the summary, do not consider LAX, since that one is either in destination or origin column and gives therefore the trivial maximum for the count
+summary(dest_count[V1 != 'LAX'])
+summary(origin_count[V1 != 'LAX'])
+
+dest_count[V1 != 'LAX'][dest_count[V1 != 'LAX']$N == max(dest_count[V1 != 'LAX']$N)] # SFO
+origin_count[V1 != 'LAX'][origin_count[V1 != 'LAX']$N == max(origin_count[V1 != 'LAX']$N)] #SFO
+# Most flights go to / come from SFO
+
+dest_count[V1 != 'LAX'][dest_count[V1 != 'LAX']$N == min(dest_count[V1 != 'LAX']$N)] # MSN
+origin_count[V1 != 'LAX'][origin_count[V1 != 'LAX']$N == min(origin_count[V1 != 'LAX']$N)] #MSN, CID
+# Only one flight went to MSN, only one flight came from MSN/CID
+
+```
+
+Results:
+* Most destinations were flown to less than 2000 times. The majority of all origins had less than 2000 flights to LAX. 
+* The mean of flights per destination is 2433.4, the median 1498.5 (excluding LAX, since that would shift the mean to a much larger value)
+* The mean of flights per origin is 2404, the median is 1460 (excluding LAX, since that would shift the mean to a much larger value)
+* Most flights went to / came from SFO (again, not considered LAX)
+* There is only one flight that went to MSN.
+* There is only one flight each that came from MSN and CID. 
+
+
+### Analysis of Airports per State
+
+```{r airports_dt, echo=FALSE}
+head(airports_dt)
+state_count <- airports_dt[, .N, by=STATE]
+boxplot(state_count$N, ylab='Airport Count per State')
+summary(state_count) # mean 5.963 airports per state
+state_count[state_count[, .I[N == max(N)]]] # most airports are in TX
+state_count[state_count[, .I[N == min(N)]]] # only one airport in CT, VT, MD, WV, GU, DE, NH, AS, RI
+airports_dt[IATA_CODE == 'LAX'][,STATE] # LAX is in CA
+
+```
+Results: 
+* In mean there are 5.938 airports per state
+* Most airports are in TX
+* There is only one airport in CT, VT, MD, WV, GU, DE, NH, AS and RI
+* LAX is in CA
+
+
+### Analysis of Reliability of Airports
+This section tries to estimate which airports are the most reliable ones. Several criteria are being used, starting with the cancellation rate.
+
+```{r airports_dt, echo=FALSE}
+#most reliable airports
+outgoing_flights <- lax_dt[ORIGIN_AIRPORT=='LAX', ]
+incoming_flights <- lax_dt[DESTINATION_AIRPORT == 'LAX', ]
+
+
+# analyse incoming flights
+i_analysis <- incoming_flights[, .(FLIGHT_SUM = .N, MEAN_AIR_TIME = mean(AIR_TIME, na.rm=TRUE), TOTAL_DEPARTURE_DELAY = sum(DEPARTURE_DELAY, na.rm=TRUE), TOTAL_ARRIVAL_DELAY = sum(ARRIVAL_DELAY, na.rm=TRUE), TOTAL_DIVERTED = sum(DIVERTED, na.rm=TRUE), TOTAL_CANCELLED=sum(CANCELLED, na.rm=TRUE), TOTAL_AIR_SYSTEM_DELAY= sum(AIR_SYSTEM_DELAY, na.rm=TRUE), TOTAL_SECURITY_DELAY=sum(SECURITY_DELAY, na.rm=TRUE), TOTAL_AIRLINE_DELAY = sum(AIRLINE_DELAY, na.rm=TRUE), TOTAL_LATE_AIRCRAFT_DELAY=sum(LATE_AIRCRAFT_DELAY, na.rm=TRUE), TOTAL_WEATHER_DELAY=sum(WEATHER_DELAY, na.rm=TRUE)), by=ORIGIN_AIRPORT]
+i_analysis
+median(i_analysis$FLIGHT_SUM) # median: 1460 flights per airport
+
+# norm in relation to flight_sum / air_time, etc. 
+cancelation_rate <- i_analysis[, .(ORIGIN_AIRPORT, CANCELATION_RATE = TOTAL_CANCELLED/FLIGHT_SUM, FLIGHT_SUM)]
+hist(cancelation_rate$CANCELATION_RATE)
+# worst cancelation_rate
+cancelation_rate[order(-CANCELATION_RATE)]
+# best cancelation_rate
+cancelation_rate[order(CANCELATION_RATE)]
+# RDU, CVG, TPA seem to be good origins, MEM, MKE probably as well, about PBI, OMA, MSN, CID no statement, since not a lot of flights went there
+
+# now same with outgoing flights
+d_analysis <- outgoing_flights[, .(FLIGHT_SUM = .N, MEAN_AIR_TIME = mean(AIR_TIME, na.rm=TRUE), TOTAL_DEPARTURE_DELAY = sum(DEPARTURE_DELAY, na.rm=TRUE), TOTAL_ARRIVAL_DELAY = sum(ARRIVAL_DELAY, na.rm=TRUE), TOTAL_DIVERTED = sum(DIVERTED, na.rm=TRUE), TOTAL_CANCELLED=sum(CANCELLED, na.rm=TRUE), TOTAL_AIR_SYSTEM_DELAY= sum(AIR_SYSTEM_DELAY, na.rm=TRUE), TOTAL_SECURITY_DELAY=sum(SECURITY_DELAY, na.rm=TRUE), TOTAL_AIRLINE_DELAY = sum(AIRLINE_DELAY, na.rm=TRUE), TOTAL_LATE_AIRCRAFT_DELAY=sum(LATE_AIRCRAFT_DELAY, na.rm=TRUE), TOTAL_WEATHER_DELAY=sum(WEATHER_DELAY, na.rm=TRUE)), by=DESTINATION_AIRPORT]
+d_analysis
+d_cancelation_rate <- d_analysis[, .(DESTINATION_AIRPORT, CANCELATION_RATE = TOTAL_CANCELLED/FLIGHT_SUM, FLIGHT_SUM)]
+hist(d_cancelation_rate$CANCELATION_RATE)
+# worst cancelation_rate
+d_cancelation_rate[order(-CANCELATION_RATE)]
+# best cancelation_rate
+d_cancelation_rate[order(CANCELATION_RATE)]
+# RDU, CVG, TPA seem to be good origins, MEM, MKE probably as well, about PBI, OMA, MSN, CID no statement, since not a lot of flights went there
+
+```
+Results:
+* considering incoming flights: MEM, TPA, PBI, CVG, MKE, RDU, OMA, MSN CID have cancelation rate 0 (there are not a lot of flights coming from MEM, PBI, OMA, MSN and CID, though)
+* considering incoming flights: ASE has by far the worst cancelation rate (8%)
+* considering outgoing flights: PBI, RDU, IND, TPA, CVG, SMX, HDN, MEM, ANC, MTJ, OMA and MSN have cancelation rate 0 (OMA, MSN, MTJ, HDN, PBI have a low total flight number, though)
+* considering outgoing flights: EGE has the worst cancelation rate (4%, 111 flights) followed by OAK (3.6%, 6288 flights) and MRY (3.6%, 1529 flights)
+
+
+In the following lines the ratio of diverted flights per airport is being analyzed.
+
+```{r airports_dt, echo=FALSE}
+# incoming_flights
+# Analysis of Diverted Flights
+i_analysis[, .(ORIGIN_AIRPORT, DIVERTED_RATIO = TOTAL_DIVERTED/FLIGHT_SUM, FLIGHT_SUM)][order(-DIVERTED_RATIO)] #BOS has worst diverted_ratio
+hist(i_analysis[, .(ORIGIN_AIRPORT, DIVERTED_RATIO = TOTAL_DIVERTED/FLIGHT_SUM, FLIGHT_SUM)][,DIVERTED_RATIO])
+d_analysis[, .(DESTINATION_AIRPORT, DIVERTED_RATIO = TOTAL_DIVERTED/FLIGHT_SUM, FLIGHT_SUM)][order(-DIVERTED_RATIO)] #ASE has worst diverted_ratio
+
+hist(d_analysis[, .(DESTINATION_AIRPORT, DIVERTED_RATIO = TOTAL_DIVERTED/FLIGHT_SUM, FLIGHT_SUM)][,DIVERTED_RATIO], main="Frequency of Proportion of Divertion per Destination Airport", xlab = "Proportion of Divertion")
+
+hist(i_analysis[, .(ORIGIN_AIRPORT, DIVERTED_RATIO = TOTAL_DIVERTED/FLIGHT_SUM, FLIGHT_SUM)][,DIVERTED_RATIO], main="Frequency of Proportion of Divertion per Origin Airport", xlab = "Proportion of Divertion")
+
+summary(d_analysis[, TOTAL_DIVERTED/FLIGHT_SUM])
+summary(i_analysis[, TOTAL_DIVERTED/FLIGHT_SUM])
+
+```
+Results: 
+* BOS has worst diverted_ratio (1.6%, 4055 flights) followed by MDW (0.8%, 1858 flights) and KOA (0.8%, 1385 flights) considering incoming flights
+* ASE has worst diverted_ratio (7.0 %, 775 flights) followed by MTJ (3.4%, only 29 flights) and HDN (3.2 %, only 63 flights) considering outgoing flights
+* Divertions are rather rare (mean of divertions per origin airport are less than 0.2% and per destination airport 0.5%)
+
+
+In the following lines the departure and arrival delay is being analysed:
+
+```{r airports_dt, echo=FALSE}
+# Analysis of Departure and Arrival Delay
+# origin
+o_delays <- i_analysis[, .(ORIGIN_AIRPORT, MEAN_DEPARTURE_DELAY = TOTAL_DEPARTURE_DELAY/FLIGHT_SUM, MEAN_ARRIVAL_DELAY = TOTAL_ARRIVAL_DELAY/FLIGHT_SUM, FLIGHT_SUM)]
+summary(o_delays)
+boxplot(o_delays[,.(MEAN_DEPARTURE_DELAY, MEAN_ARRIVAL_DELAY)], ylab='Time', main='Departure Delays are higher than Arrival Delays per Origin Airport')
+ggplot(o_delays, aes(MEAN_DEPARTURE_DELAY, MEAN_ARRIVAL_DELAY)) + geom_point() + xlab("Mean Departure Delay") + ylab("Mean Arrival Delay") + ggtitle("Possible Linear Correlation between Mean Departure and Arrival Delay")
+cor(o_delays$MEAN_ARRIVAL_DELAY, o_delays$MEAN_DEPARTURE_DELAY)
+# origin delays
+o_delays[order(-MEAN_DEPARTURE_DELAY)]
+o_delays[order(-MEAN_ARRIVAL_DELAY)]
+# destination
+d_delays <- d_analysis[, .(DESTINATION_AIRPORT, MEAN_DEPARTURE_DELAY = TOTAL_DEPARTURE_DELAY/FLIGHT_SUM, MEAN_ARRIVAL_DELAY = TOTAL_ARRIVAL_DELAY/FLIGHT_SUM, FLIGHT_SUM)]
+summary(d_delays)
+boxplot(d_delays[,.(MEAN_DEPARTURE_DELAY, MEAN_ARRIVAL_DELAY)], ylab='Time', main='Departure Delays are higher than Arrival Delays per Destination Airport')
+ggplot(d_delays, aes(MEAN_DEPARTURE_DELAY, MEAN_ARRIVAL_DELAY)) + geom_point() + xlab("Mean Departure Delay") + ylab("Mean Arrival Delay") + ggtitle("Possible Linear Correlation between Mean Departure and Arrival Delay")
+cor(d_delays$MEAN_ARRIVAL_DELAY, d_delays$MEAN_DEPARTURE_DELAY)
+# destination delays
+d_delays[order(-MEAN_DEPARTURE_DELAY)]
+d_delays[order(-MEAN_ARRIVAL_DELAY)]
+```
+Results:
+Considering origin airports: 
+* Median mean departure delay of 9.779 per destination, median mean arrival delay of 4.824 per origin.
+* Scatterplot suggest linear correlation between mean departure and mean arrival delay per origin. The correlation coefficient is 0.76.
+* CID has highest mean departure delay (29), but only one flight goes there. IAH has second highest mean departure delay (22.76) with 4432 flights. 
+* CID has also the highest arrival delay (47), but as mentioned above there is only one flight with that origin in the dataset. HDN, MTJ have the second and third largest mean arrival delay, but also for those airports only few flights are in the dataset. The forth largest mean arrival delay is from the airport IAH (16.57, 4432 flights).
+
+Considering destination airports:
+* Median mean departure delay of 10.080 per destination, median mean arrival delay of 5.683 per destination.
+* Scatterplot suggest linear correlation between mean departure and mean arrival delay per destination. The correlation coefficient is 0.71.
+* MTJ airport has highest mean departure delay (25.7), though only 29 flights are in the dataset. MKE has second highest departure delay (17.8) with a total of 380 flights.
+* MTJ airport has also the highest mean arrival delay (26.3). The first airport in the list of highest mean arrival delays with more than 100 total flights is FLL (4th highest delay of 16.2, 1747 flights). 
+
+
+### Analysis the correlation between Velocities and Distance
+
+The following plot visualizes the correlation between distance and velocity of the flights.
+
+```{r airports_dt, echo=FALSE}
+velocities2 <- lax_dt[, .(DISTANCE, VELOCITY = DISTANCE/AIR_TIME, AIRLINE)]
+ggplot(velocities2, aes(DISTANCE, VELOCITY, color = AIRLINE)) + geom_point()
+```
+Results: 
+* Flights with small distances have a rather small mean velocity.
+* There seems to exist a maximum speed which the planes can't exceed. Since the data does not include the unit information this maximum velocity can't be estimated.
+* There is no obvious direct causation between airlines and velocities. However, different airlines have different main destinations and might therefore have rather slower / faster flights depending on the distance of those destinations. Therefore the plot from above might be more appropriate without the color distinction (see below).
+
+```{r airports_dt, echo=FALSE}
+ggplot(velocities2, aes(DISTANCE, VELOCITY)) + geom_point()
+```
+
+
+## SEASON analysis
+
+Loading libraries and data, creating column season according to the next: \
+Winter 21.12. - 19.3. \
+Spring 20.3. - 20.6. \
+Summer 21.6. - 22.9. \
+Autumn 23.9. - 20.12.
+
+```{r}
+flights <- read.csv("flightsLAX.csv")
+flights <- as.data.table(flights)
+
+#column season
+flights <- flights[, SEASON:= "SPRING"] 
+flights[((MONTH==1) | (MONTH==2) | (MONTH==12 & DAY >=21 ) | (MONTH==3 & DAY <= 19 )), "SEASON"] <- "WINTER"
+flights[((MONTH==7) | (MONTH==8) | (MONTH==6 & DAY >=21 ) | (MONTH==9 & DAY <= 22 )), "SEASON"] <- "SUMMER"
+flights[((MONTH==10) | (MONTH==11) | (MONTH==9 & DAY >=23 ) | (MONTH==12 & DAY <= 20 )), "SEASON"] <- "AUTUMN"
+flights[, SEASON:= as.factor(SEASON)]
+
+```
+
+### Small analysis
+
+We created tables to see the number of flights each season, month and day of a week. Then computed and showed in the graph cancellation rate and rate of diverted flights per each season, month and day of a week.
+
+```{r}
+table(flights$MONTH)
+table(flights$DAY_OF_WEEK)
+table(flights$SEASON)
+
+#cancellation
+cancelM <- as.data.table(table(flights$CANCELLED, by=flights$MONTH))
+cancelM <- dcast(cancelM, by ~ V2)
+setnames(cancelM, c("month","no","yes"))
+cancelM[, percentage_of_cancellation := yes/(yes+no)*100]
+
+cancelD <- as.data.table(table(flights$CANCELLED, by=flights$DAY_OF_WEEK))
+cancelD <- dcast(cancelD, by ~ V2)
+setnames(cancelD, c("day","no","yes"))
+cancelD[, percentage_of_cancellation := yes/(yes+no)*100]
+
+cancelS <- as.data.table(table(flights$CANCELLED, by=flights$SEASON))
+cancelS <- dcast(cancelS, by ~ V2)
+setnames(cancelS, c("season","no","yes"))
+cancelS[, percentage_of_cancellation := yes/(yes+no)*100]
+
+#diverted
+diverM <- as.data.table(table(flights$DIVERTED, by=flights$MONTH))
+diverM <- dcast(diverM, by ~ V2)
+setnames(diverM, c("month","no","yes"))
+diverM[, percentage_of_diverted := yes/(yes+no)*100]
+
+diverD <- as.data.table(table(flights$DIVERTED, by=flights$DAY_OF_WEEK))
+diverD <- dcast(diverD, by ~ V2)
+setnames(diverD, c("day","no","yes"))
+diverD[, percentage_of_diverted := yes/(yes+no)*100]
+
+diverS <- as.data.table(table(flights$DIVERTED, by=flights$SEASON))
+diverS <- dcast(diverS, by ~ V2)
+setnames(diverS, c("season","no","yes"))
+diverS[, percentage_of_diverted := yes/(yes+no)*100]
+
+```
+Findings: \
+• missing October \
+• less number of flights in autumn due to missing October \
+• the least number of flights: February, Saturday \
+• the highest number of flights: Summer, July, Monday \
+
+Now plotting
+
+```{r}
+ggplot(cancelM, aes(month, percentage_of_cancellation)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Cancellation")
+ggplot(diverM, aes(month, percentage_of_diverted)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Diverted flights")
+
+ggplot(cancelD, aes(day, percentage_of_cancellation)) + 
+  geom_bar(stat="identity") +
+  labs(title="Cancellation")
+ggplot(diverD, aes(day, percentage_of_diverted)) + 
+  geom_bar(stat="identity") +
+  labs(title="Diverted flights")
+
+ggplot(cancelS, aes(season, percentage_of_cancellation)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Cancellation")
+ggplot(diverS, aes(season, percentage_of_diverted)) + 
+  geom_bar(stat="identity") +
+  labs(title="Diverted flights")
+
+```
+Findings: \
+• cancellation rate \
+- most Winter, February, Tuesday \
+- least Autumn, May, Saturday \
+• rate of diverted flights \
+- most Winter, December, Sunday \
+- least Autumn, Septmeber, Friday \
+
+### Cancellation and diverted flights in each airline according to season
+
+We computed the cancellation rate and rate of diverted flights of each airline per season and showed the one with the highest rate.
+
+```{r}
+sub1 <- flights[, .SD, .SDcols=c("AIRLINE", "DIVERTED", "CANCELLED", "SEASON")]
+
+sub1<-sub1[,lapply(.SD, function(x) {sum(x)/length(x)*100}), by=c("AIRLINE", "SEASON")]
+
+airC_S <- sub1[, .SD[which.max(CANCELLED)], by=SEASON]
+airC_S[, DIVERTED:=NULL]
+airC_S
+airD_S <- sub1[, .SD[which.max(DIVERTED)], by=SEASON]
+airD_S[, CANCELLED:=NULL]
+airD_S
+
+flights[AIRLINE=="MQ", unique(ORIGIN_AIRPORT)]
+flights[AIRLINE=="MQ", unique(DESTINATION_AIRPORT)]
+
+ggplot(sub1, aes(AIRLINE, CANCELLED)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Cancellation") + 
+  facet_wrap("SEASON")
+
+ggplot(sub1, aes(AIRLINE, DIVERTED)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Diverted flights") + 
+  facet_wrap("SEASON")
+
+```
+Findings: \
+• Airline MQ - the highest rate of cancellation and diverted flights in every season !! \
+- it flies from LAX to ASE and back,  ASE airport 2,384 metres above sea level, and it goes from LAX above rocky mountains \
+
+### Cancellation and diverted flights in each airline according to month
+
+We computed the cancellation rate and rate of diverted flights of each airline per month and showed the one with the highest rate.
+
+```{r}
+sub2 <- flights[, .SD, .SDcols=c("AIRLINE", "DIVERTED", "CANCELLED", "MONTH")]
+
+sub2<-sub2[,lapply(.SD, function(x) {sum(x)/length(x)*100}), by=c("AIRLINE", "MONTH")]
+airC_M <- sub2[, .SD[which.max(CANCELLED)], by=MONTH]
+airC_M[, DIVERTED:=NULL]
+airC_M
+airD_M <- sub2[, .SD[which.max(DIVERTED)], by=MONTH]
+airD_M[, CANCELLED:=NULL]
+airD_M
+
+ggplot(sub2, aes(AIRLINE, CANCELLED)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Cancellation") + 
+  facet_wrap("MONTH") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+ggplot(sub2, aes(AIRLINE, DIVERTED)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Diverted flights") + 
+  facet_wrap("MONTH") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+``` 
+Findings: \
+• MQ - the highest cancellation rate and rate of diverted flights in almost every season \ 
+
+### Cancellation and diverted flights in each destination airport according to season
+We computed the cancellation rate and rate of diverted flights of each destination airport per season and showed the one with the highest rate.
+
+```{r}
+sub3 <- flights[, .SD, .SDcols=c("DESTINATION_AIRPORT", "DIVERTED", "CANCELLED", "SEASON")]
+
+sub3<-sub3[,lapply(.SD, function(x) {sum(x)/length(x)*100}), by=c("DESTINATION_AIRPORT", "SEASON")]
+destC_S <- sub3[, .SD[which.max(CANCELLED)], by=SEASON]
+destC_S[, DIVERTED:=NULL]
+destC_S
+destD_S <- sub3[, .SD[which.max(DIVERTED)], by=SEASON]
+destD_S[, CANCELLED:=NULL]
+destD_S
+
+ggplot(sub3, aes(DESTINATION_AIRPORT, CANCELLED)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Cancellation") + 
+  facet_wrap("SEASON") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=5))
+
+ggplot(sub3, aes(DESTINATION_AIRPORT, DIVERTED)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Diverted flights") + 
+  facet_wrap("SEASON") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=5))
+
+```
+Findings: \
+• diverted flights - most ASE in every season \
+• cancellation - most EGE, MRY, SAF, ASE \
+- ASE, EGE both in Colorado, SAF - New Mexiko near Colorado
+
+### Cancellation and diverted flights in each destination airport according to month
+We computed the cancellation rate and rate of diverted flights of each destination airport per month and showed the one with the highest rate.
+
+```{r}
+sub4 <- flights[, .SD, .SDcols=c("DESTINATION_AIRPORT", "DIVERTED", "CANCELLED", "MONTH")]
+
+sub4<-sub4[,lapply(.SD, function(x) {sum(x)/length(x)*100}), by=c("DESTINATION_AIRPORT", "MONTH")]
+desC_M <- sub4[, .SD[which.max(CANCELLED)], by=MONTH]
+desC_M[, DIVERTED:=NULL]
+desC_M
+desD_M <- sub4[, .SD[which.max(DIVERTED)], by=MONTH]
+desD_M[, CANCELLED:=NULL]
+desD_M
+
+ggplot(sub4, aes(DESTINATION_AIRPORT, CANCELLED)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Cancellation") + 
+  facet_wrap("MONTH") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=5))
+
+ggplot(sub4, aes(DESTINATION_AIRPORT, DIVERTED)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Diverted flights") + 
+  facet_wrap("MONTH") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=5))
+
+```
+Findings: \
+• diverted flights - most ASE in every season, MTJ, HDN \
+• cancellation - most EGE, MRY, SAF \
+- ASE, HDN, MTJ, SAF, EGE - COlorado !!!
+
+
+### Number of cancellations - days in each month
+We plotted the number of cancelled flights in each day each month and found on the internet if something happened that day.
+
+```{r}
+barplot(flights[MONTH==1, sum(CANCELLED), by=DAY]$V1, xlab='Day', ylab='Number of Cancelled Flights', main = 'January')
+barplot(flights[MONTH==2, sum(CANCELLED), by=DAY]$V1, xlab='Day', ylab='Number of Cancelled Flights', main = 'February')
+barplot(flights[MONTH==3, sum(CANCELLED), by=DAY]$V1, xlab='Day', ylab='Number of Cancelled Flights', main = 'March')
+barplot(flights[MONTH==4, sum(CANCELLED), by=DAY]$V1, xlab='Day', ylab='Number of Cancelled Flights', main = 'April')
+barplot(flights[MONTH==5, sum(CANCELLED), by=DAY]$V1, xlab='Day', ylab='Number of Cancelled Flights', main = 'May')
+barplot(flights[MONTH==6, sum(CANCELLED), by=DAY]$V1, xlab='Day', ylab='Number of Cancelled Flights', main = 'June')
+barplot(flights[MONTH==7, sum(CANCELLED), by=DAY]$V1, xlab='Day', ylab='Number of Cancelled Flights', main = 'July')
+barplot(flights[MONTH==8, sum(CANCELLED), by=DAY]$V1, xlab='Day', ylab='Number of Cancelled Flights', main = 'August')
+barplot(flights[MONTH==9, sum(CANCELLED), by=DAY]$V1, xlab='Day', ylab='Number of Cancelled Flights', main = 'September')
+barplot(flights[MONTH==11, sum(CANCELLED), by=DAY]$V1, xlab='Day', ylab='Number of Cancelled Flights', main = 'November')
+barplot(flights[MONTH==12, sum(CANCELLED), by=DAY]$V1, xlab='Day', ylab='Number of Cancelled Flights', main = 'December')
+```
+Findings: \
+• January 26,27 - A blizzard hits the Northeast shutting down major cities including New York City and Boston, with up to 60 million people affected !!!!!!!!!!!! \
+• July 17-21 - The Cajon Pass wildfire spreads across 4,250 acres (1,720 ha) in the Mojave Desert near the towns of Victorville and Hesperia, north of San Bernardino and south of Bakersfield in the state of California \
+
+### Number of diverted flights - days in each month
+We plotted the number of diverted flights in each day each month and found on the internet if something happened that day.
+
+```{r}
+barplot(flights[MONTH==1, sum(DIVERTED), by=DAY]$V1, xlab='Day', ylab='Number of Diverted Flights', main = 'January')
+barplot(flights[MONTH==2, sum(DIVERTED), by=DAY]$V1, xlab='Day', ylab='Number of Diverted Flights', main = 'February')
+barplot(flights[MONTH==3, sum(DIVERTED), by=DAY]$V1, xlab='Day', ylab='Number of Diverted Flights', main = 'March')
+barplot(flights[MONTH==4, sum(DIVERTED), by=DAY]$V1, xlab='Day', ylab='Number of Diverted Flights', main = 'April')
+barplot(flights[MONTH==5, sum(DIVERTED), by=DAY]$V1, xlab='Day', ylab='Number of Diverted Flights', main = 'May')
+barplot(flights[MONTH==6, sum(DIVERTED), by=DAY]$V1, xlab='Day', ylab='Number of Diverted Flights', main = 'June')
+barplot(flights[MONTH==7, sum(DIVERTED), by=DAY]$V1, xlab='Day', ylab='Number of Diverted Flights', main = 'July')
+barplot(flights[MONTH==8, sum(DIVERTED), by=DAY]$V1, xlab='Day', ylab='Number of Diverted Flights', main = 'August')
+barplot(flights[MONTH==9, sum(DIVERTED), by=DAY]$V1, xlab='Day', ylab='Number of Diverted Flights', main = 'September')
+barplot(flights[MONTH==11, sum(DIVERTED), by=DAY]$V1, xlab='Day', ylab='Number of Diverted Flights', main = 'November')
+barplot(flights[MONTH==12, sum(DIVERTED), by=DAY]$V1, xlab='Day', ylab='Number of Diverted Flights', main = 'December')
+```
+Findings: \
+• July 17-21 - The Cajon Pass wildfire spreads across 4,250 acres (1,720 ha) in the Mojave Desert near the towns of Victorville and Hesperia, north of San Bernardino and south of Bakersfield in the state of California \
+• December 24 - before the Christmas Eve \
+
+
+### Delay mean - days in each month
+We plotted the mean of delay in each day each month and found on the internet if something happened that day.
+
+```{r}
+barplot(flights[MONTH==1, mean(ARRIVAL_DELAY, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Delay Mean', main = 'January')
+barplot(flights[MONTH==2, mean(ARRIVAL_DELAY, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Delay Mean', main = 'February')
+barplot(flights[MONTH==3, mean(ARRIVAL_DELAY, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Delay Mean', main = 'March')
+barplot(flights[MONTH==4, mean(ARRIVAL_DELAY, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Delay Mean', main = 'April')
+barplot(flights[MONTH==5, mean(ARRIVAL_DELAY, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Delay Mean', main = 'May')
+barplot(flights[MONTH==6, mean(ARRIVAL_DELAY, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Delay Mean', main = 'June')
+barplot(flights[MONTH==7, mean(ARRIVAL_DELAY, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Delay Mean', main = 'July')
+barplot(flights[MONTH==8, mean(ARRIVAL_DELAY, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Delay Mean', main = 'August')
+barplot(flights[MONTH==9, mean(ARRIVAL_DELAY, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Delay Mean', main = 'September')
+barplot(flights[MONTH==11, mean(ARRIVAL_DELAY, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Delay Mean', main = 'November')
+barplot(flights[MONTH==12, mean(ARRIVAL_DELAY, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Delay Mean', main = 'December')
+
+flights[225738,] # delay one day and something
+```
+Findings: \
+• by mean - nothing speacial \
+• July 17-21 - The Cajon Pass wildfire spreads across 4,250 acres (1,720 ha) in the Mojave Desert near the towns of Victorville and Hesperia, north of San Bernardino and south of Bakersfield in the state of California \
+• February 5 - special for some reason \
+
+
+### Delays according to month
+We computed the delays mean in each month. Moreover, we plotted the number of flights with the delay higher than 60 or 300 minutes in each day each month.
+
+```{r}
+flights[, mean(ARRIVAL_DELAY, na.rm = TRUE), by=MONTH]
+
+barplot(flights[MONTH==1, sum(ARRIVAL_DELAY>=60, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 60 minutes', main = 'January')
+barplot(flights[MONTH==1, sum(ARRIVAL_DELAY>=300, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 300 minutes', main = 'January')
+
+barplot(flights[MONTH==2, sum(ARRIVAL_DELAY>=60, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 60 minutes', main = 'February')
+barplot(flights[MONTH==2, sum(ARRIVAL_DELAY>=300, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 300 minutes', main = 'February')
+
+barplot(flights[MONTH==3, sum(ARRIVAL_DELAY>=60, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 60 minutes', main = 'March')
+barplot(flights[MONTH==3, sum(ARRIVAL_DELAY>=300, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 300 minutes', main = 'March')
+
+barplot(flights[MONTH==4, sum(ARRIVAL_DELAY>=60, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 60 minutes', main = 'April')
+barplot(flights[MONTH==4, sum(ARRIVAL_DELAY>=300, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 300 minutes', main = 'April')
+
+barplot(flights[MONTH==5, sum(ARRIVAL_DELAY>=60, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 60 minutes', main = 'May')
+barplot(flights[MONTH==5, sum(ARRIVAL_DELAY>=300, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 300 minutes', main = 'May')
+
+barplot(flights[MONTH==6, sum(ARRIVAL_DELAY>=60, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 60 minutes', main = 'June')
+barplot(flights[MONTH==6, sum(ARRIVAL_DELAY>=300, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 300 minutes', main = 'June')
+
+barplot(flights[MONTH==7, sum(ARRIVAL_DELAY>=60, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 60 minutes', main = 'July')
+barplot(flights[MONTH==7, sum(ARRIVAL_DELAY>=300, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 300 minutes', main = 'July')
+
+barplot(flights[MONTH==8, sum(ARRIVAL_DELAY>=60, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 60 minutes', main = 'August')
+barplot(flights[MONTH==8, sum(ARRIVAL_DELAY>=300, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 300 minutes', main = 'August')
+
+barplot(flights[MONTH==9, sum(ARRIVAL_DELAY>=60, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 60 minutes', main = 'September')
+barplot(flights[MONTH==9, sum(ARRIVAL_DELAY>=300, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 300 minutes', main = 'September')
+
+barplot(flights[MONTH==11, sum(ARRIVAL_DELAY>=60, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 60 minutes', main = 'November')
+barplot(flights[MONTH==11, sum(ARRIVAL_DELAY>=300, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 300 minutes', main = 'November')
+
+barplot(flights[MONTH==12, sum(ARRIVAL_DELAY>=60, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 60 minutes', main = 'December')
+barplot(flights[MONTH==12, sum(ARRIVAL_DELAY>=300, na.rm = TRUE), by=DAY]$V1, xlab='Day', ylab='Number of flights with delay greater than 300 minutes', main = 'December')
+```
+Findings: \
+• months 6,7,8,12 more delays \ 
+• the highest number of delays - months 6,7,12 according to mean - obvious - Summer, Christmas \ 
+
+• February 5 - special for some reason \ 
+• July 17-21 - The Cajon Pass wildfire spreads across 4,250 acres (1,720 ha) in the Mojave Desert near the towns of Victorville and Hesperia, north of San Bernardino and south of Bakersfield in the state of California \ 
+• September 21, August 20 ??? \
+
+### Dealys higher than 180 or 720 minutes
+We plotted the delays higher than 180 and 720 minutes each, according to season and month.
+
+```{r}
+delaysmorethan180 <- flights[ARRIVAL_DELAY>=180]
+head(delaysmorethan180, n=30)
+
+ggplot(delaysmorethan180, aes(DAY,ARRIVAL_DELAY, na.rm=TRUE)) + 
+  geom_point() +
+  facet_wrap("MONTH")
+
+ggplot(delaysmorethan180, aes(DAY,ARRIVAL_DELAY, na.rm=TRUE)) + 
+  geom_point() +
+  facet_wrap("SEASON")
+
+##
+delaysmorethan720 <- flights[ARRIVAL_DELAY>=720]
+
+ggplot(delaysmorethan720, aes(DAY,ARRIVAL_DELAY, na.rm=TRUE)) + 
+  geom_point() +
+  facet_wrap("MONTH")
+
+ggplot(delaysmorethan720, aes(DAY,ARRIVAL_DELAY, na.rm=TRUE)) + 
+  geom_point() +
+  facet_wrap("SEASON")
+
+```
+Findings: \
+• there are delays  more than 1 day !! \ 
+• delays in autumn do not reach such high measures as in summer and winter  \ 
+
+### Delays according to season
+We computed the percentual number of outliers in  delays in every season - either according to the common distribution of delays or to the distribution of delays in each season.
+
+```{r}
+sub5 <- flights[, .SD, .SDcols=c("MONTH", "DAY", "ARRIVAL_DELAY", "SEASON")]
+class(sub5)
+
+sub5<- na.omit(sub5, cols = "ARRIVAL_DELAY")
+
+seasondelay<-sub5[, .(mean=mean(ARRIVAL_DELAY, na.rm=TRUE), sd=sd(ARRIVAL_DELAY, na.rm=TRUE), median=median(ARRIVAL_DELAY, na.rm=TRUE)), by="SEASON"]
+seasondelay
+
+border_WINT <- quantile(flights[SEASON=="WINTER",ARRIVAL_DELAY], na.rm=TRUE, 0.75) +  1.5*IQR(flights[SEASON=="WINTER",ARRIVAL_DELAY], na.rm=TRUE)
+border_SPR <- quantile(flights[SEASON=="SPRING",ARRIVAL_DELAY], na.rm=TRUE, 0.75) +  1.5*IQR(flights[SEASON=="SPRING",ARRIVAL_DELAY], na.rm=TRUE)
+border_SUMM <- quantile(flights[SEASON=="SUMMER",ARRIVAL_DELAY], na.rm=TRUE, 0.75) +  1.5*IQR(flights[SEASON=="SUMMER",ARRIVAL_DELAY], na.rm=TRUE)
+border_AUT <- quantile(flights[SEASON=="AUTUMN",ARRIVAL_DELAY], na.rm=TRUE, 0.75) +  1.5*IQR(flights[SEASON=="AUTUMN",ARRIVAL_DELAY], na.rm=TRUE)
+
+border <- quantile(sub5$ARRIVAL_DELAY, 0.75) +  1.5*IQR(sub5$ARRIVAL_DELAY)
+
+ggplot(sub5, aes(as.factor(SEASON), ARRIVAL_DELAY)) + 
+  geom_boxplot()
+
+#distribution acc to season
+N_out_Wint <- sum(flights[SEASON=="WINTER", ARRIVAL_DELAY>=border_WINT], na.rm = TRUE)
+N_out_Spr <- sum(flights[SEASON=="SPRING", ARRIVAL_DELAY>=border_SPR], na.rm=TRUE)
+N_out_Summ <- sum(flights[SEASON=="SUMMER", ARRIVAL_DELAY>=border_SUMM], na.rm=TRUE)
+N_out_Aut <- sum(flights[SEASON=="AUTUMN", ARRIVAL_DELAY>=border_AUT], na.rm=TRUE)
+
+percW <- N_out_Wint*100/sub5[SEASON=="WINTER", .N]
+percSP <- N_out_Spr*100/sub5[SEASON=="SPRING", .N]
+percSU <- N_out_Summ*100/sub5[SEASON=="SUMMER", .N]
+percA <- N_out_Aut*100/sub5[SEASON=="AUTUMN", .N]
+
+#common ditribution
+N_out_Wint2 <- sum(flights[SEASON=="WINTER", ARRIVAL_DELAY>=border], na.rm = TRUE)
+N_out_Spr2 <- sum(flights[SEASON=="SPRING", ARRIVAL_DELAY>=border], na.rm=TRUE)
+N_out_Summ2 <- sum(flights[SEASON=="SUMMER", ARRIVAL_DELAY>=border], na.rm=TRUE)
+N_out_Aut2 <- sum(flights[SEASON=="AUTUMN", ARRIVAL_DELAY>=border], na.rm=TRUE)
+
+percW2 <- N_out_Wint2*100/sub5[SEASON=="WINTER", .N]
+percSP2 <- N_out_Spr2*100/sub5[SEASON=="SPRING", .N]
+percSU2 <- N_out_Summ2*100/sub5[SEASON=="SUMMER", .N]
+percA2 <- N_out_Aut2*100/sub5[SEASON=="AUTUMN", .N]
+
+data.table(SEASON= c("WINTER", "SPRING", "SUMMER", "AUTUMN"), number_of_outliers_s=c(N_out_Wint, N_out_Spr, N_out_Summ, N_out_Wint), percentage_in_season=c(percW, percSP, percSU, percA), number_of_outliers_w=c(N_out_Wint2, N_out_Spr2, N_out_Summ2, N_out_Wint2), percentage_whole=c(percW2, percSP2, percSU2, percA2))
+
+```
+Findings: \
+• winter, summer - the highest mean of delays \
+• outliers - computed according to every seeason \
+- summer - the highest percentage of outlier delays \
+- autumn - least
+• outliers - computed according to common distribution \
+- most outliers - Summer, then Winter \
+- autumn - least \ 
+
+### Delays - airlines vs. season
+We looked at the distribution of each airline. Moreover, we computed the mean, standard deviation and median of delays in each airline in each season and plotted the mean. Then we looked at the percentual number of outlier delays in each airline in each season according to common distribution of delays and according to distribution of delays in each season.
+
+```{r}
+sub6 <- flights[, .SD, .SDcols=c("AIRLINE", "ARRIVAL_DELAY", "SEASON")]
+sub7 <- flights[, .SD, .SDcols=c("SEASON", "ARRIVAL_DELAY")]
+
+ggplot(sub6, aes(as.factor(AIRLINE), ARRIVAL_DELAY)) + 
+  geom_boxplot() +
+  facet_wrap("SEASON")
+
+sub6<- na.omit(sub6, cols="ARRIVAL_DELAY")
+sub7<- na.omit(sub7, cols="ARRIVAL_DELAY")
+
+sub6[, .(mean=mean(ARRIVAL_DELAY), sd=sd(ARRIVAL_DELAY), median=median(ARRIVAL_DELAY)), by=c("AIRLINE", "SEASON")]
+
+ggplot(sub6[, .(mean=mean(ARRIVAL_DELAY), sd=sd(ARRIVAL_DELAY), median=median(ARRIVAL_DELAY)), by=c("AIRLINE", "SEASON")], aes(AIRLINE, mean)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Delay mean") + 
+  facet_wrap("SEASON") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=10))
+
+border <- quantile(sub5$ARRIVAL_DELAY, 0.75) +  1.5*IQR(sub5$ARRIVAL_DELAY)
+borders<-sub7[,lapply(.SD, function(x) {quantile(x, 0.75)+1.5*IQR(x)}), by=c("SEASON")]
+
+N_out <- sub6[,lapply(.SD, function(x) {sum(x>=border)*100/length(x)}), by=c("AIRLINE", "SEASON")]
+
+ggplot(N_out, aes(AIRLINE, ARRIVAL_DELAY)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Percentage of outliers according to common distribution") + 
+  facet_wrap("SEASON") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=10))
+
+#outliers acc to distr in season
+sub6w<- sub6[SEASON=="WINTER"][,SEASON:=NULL]
+N_out_air_wint<- sub6w[,lapply(.SD, function(x) {sum(x>=borders[SEASON=="WINTER", ARRIVAL_DELAY])*100/length(x)}), by="AIRLINE"]
+
+ggplot(N_out_air_wint, aes(AIRLINE, ARRIVAL_DELAY)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Percentage of outliers according to distribution in season - winter") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=10))
+
+sub6sp<- sub6[SEASON=="SPRING"][,SEASON:=NULL]
+N_out_air_sp<- sub6sp[,lapply(.SD, function(x) {sum(x>=borders[SEASON=="SPRING", ARRIVAL_DELAY])*100/length(x)}), by="AIRLINE"]
+
+ggplot(N_out_air_sp, aes(AIRLINE, ARRIVAL_DELAY)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Percentage of outliers according to distribution in season - spring") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=10))
+
+sub6su<- sub6[SEASON=="SUMMER"][,SEASON:=NULL]
+N_out_air_su<- sub6su[,lapply(.SD, function(x) {sum(x>=borders[SEASON=="SUMMER", ARRIVAL_DELAY])*100/length(x)}), by="AIRLINE"]
+
+ggplot(N_out_air_su, aes(AIRLINE, ARRIVAL_DELAY)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Percentage of outliers according to distribution in season - summer") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=10))
+
+sub6au<- sub6[SEASON=="AUTUMN"][,SEASON:=NULL]
+N_out_air_au<- sub6au[,lapply(.SD, function(x) {sum(x>=borders[SEASON=="AUTUMN", ARRIVAL_DELAY])*100/length(x)}), by="AIRLINE"]
+
+ggplot(N_out_air_au, aes(AIRLINE, ARRIVAL_DELAY)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Percentage of outliers according to distribution in season - autumn") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=10))
+```
+Findings: \
+• plot \
+- AA - the highest delays almost every season - delay more than a day !!!! \
+- US - no flights during autumn \ 
+- MQ in autumn - no outliers - almost 0 delays
+
+• table + plot \
+- WINTER - MQ,NK highest mean, also sd.................HA, AS - lowest \
+- SPRING - MQ,NK, F9..........................AS, HA, US \
+- SUMMER - WN, NK, OO..........................AS, HA, B6, AA \
+- AUTUMN - NK .....really low delays :) ........................AS, HA, MQ \
+
+• number of outliers acc to whole distr. \
+- winter - MQ, NK most - HA, AS least \
+- spring - NK, MQ, F9 most - HA, AS least \ 
+- summer - MQ, NK most - HA least \
+- autumn - F9 most - MQ, US no outliers
+
+• number of outliers acc to distr. in seasons \
+- winter - B6, NK, MQ, F9 most - HA, AS least \
+- spring - NK, MQ, F9 most - HA, AS least \
+- summer - MK, NK most - HA least \
+- autumn - NK, F9 most - MQ no outliers \
+
+
+### Delays - destination airport vs. season
+We computed the mean, standard deviation and median of delay in each destination airport in each season and plotted the mean. Then we looked at the percentual number of outlier delays in each destination airport in each season according to common distribution of delays and according to distribution of delays in each season.
+```{r}
+sub8 <- flights[, .SD, .SDcols=c("DESTINATION_AIRPORT", "ARRIVAL_DELAY", "SEASON")]
+sub9 <- flights[, .SD, .SDcols=c("SEASON", "ARRIVAL_DELAY")]
+
+sub8<- na.omit(sub8, cols="ARRIVAL_DELAY")
+sub9<- na.omit(sub9, cols="ARRIVAL_DELAY")
+
+sub8[, .(mean=mean(ARRIVAL_DELAY), sd=sd(ARRIVAL_DELAY), median=median(ARRIVAL_DELAY)), by=c("DESTINATION_AIRPORT", "SEASON")][, .SD[which.max(mean)], by=SEASON]
+sub8[, .(mean=mean(ARRIVAL_DELAY), sd=sd(ARRIVAL_DELAY), median=median(ARRIVAL_DELAY)), by=c("DESTINATION_AIRPORT", "SEASON")][, .SD[which.max(median)], by=SEASON]
+
+sub8[, .(mean=mean(ARRIVAL_DELAY), sd=sd(ARRIVAL_DELAY), median=median(ARRIVAL_DELAY)), by=c("DESTINATION_AIRPORT", "SEASON")][, .SD[which.min(mean)], by=SEASON]
+sub8[, .(mean=mean(ARRIVAL_DELAY), sd=sd(ARRIVAL_DELAY), median=median(ARRIVAL_DELAY)), by=c("DESTINATION_AIRPORT", "SEASON")][, .SD[which.min(median)], by=SEASON]
+
+#outliers
+border <- quantile(sub8$ARRIVAL_DELAY, 0.75) +  1.5*IQR(sub8$ARRIVAL_DELAY)
+borders<-sub9[,lapply(.SD, function(x) {quantile(x, 0.75)+1.5*IQR(x)}), by=c("SEASON")]
+
+N_out <- sub8[,lapply(.SD, function(x) {sum(x>=border)*100/length(x)}), by=c("DESTINATION_AIRPORT", "SEASON")]
+
+ggplot(N_out, aes(DESTINATION_AIRPORT, ARRIVAL_DELAY)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Delay mean") + 
+  facet_wrap("SEASON") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=10))
+
+#outliers acc to distr in season
+sub8w<- sub8[SEASON=="WINTER"][,SEASON:=NULL]
+N_out_d_wint<- sub8w[,lapply(.SD, function(x) {sum(x>=borders[SEASON=="WINTER", ARRIVAL_DELAY])*100/length(x)}), by="DESTINATION_AIRPORT"]
+
+sub8sp<- sub8[SEASON=="SPRING"][,SEASON:=NULL]
+N_out_d_sp<- sub8sp[,lapply(.SD, function(x) {sum(x>=borders[SEASON=="SPRING", ARRIVAL_DELAY])*100/length(x)}), by="DESTINATION_AIRPORT"]
+
+sub8su<- sub8[SEASON=="SUMMER"][,SEASON:=NULL]
+N_out_d_su<- sub8su[,lapply(.SD, function(x) {sum(x>=borders[SEASON=="SUMMER", ARRIVAL_DELAY])*100/length(x)}), by="DESTINATION_AIRPORT"]
+
+sub8au<- sub8[SEASON=="AUTUMN"][,SEASON:=NULL]
+N_out_d_au<- sub8au[,lapply(.SD, function(x) {sum(x>=borders[SEASON=="AUTUMN", ARRIVAL_DELAY])*100/length(x)}), by="DESTINATION_AIRPORT"]
+```
+Findings: \
+• tables + plot
+- BZN - worst in Autumn, Spring \
+- PSP - worst in Summer \
+- ANC - best in almost every season \
+
+• outliers acc to whole distr. \
+- Winter - MTJ most - ANC, SAF least \ 
+- Spring - GEG most - JAC, EGE, HDN, MTJ 0%  \ 
+- Summer - PSP most - MSY, MEM, MSN GEG 0% \
+- Autumn - BZP 75%, HDN most - PIT, JAC, EGE, MTJ 0% \
+
+• outliers acc to distr in season \
+- Winter - MTJ worst - MEM best \
+- Spring - GEG worst - HDN, MTJ, JAC, EGE 0%\
+- Summer - PSP worst - MSN, GEG, MEM 0%\
+- Autumn - BZN worst 75% :O  - EGE, MTJ, JAC, PIT 0%\
