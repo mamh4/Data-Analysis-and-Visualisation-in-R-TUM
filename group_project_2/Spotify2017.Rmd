@@ -1,0 +1,1688 @@
+---
+title: "CaseStudyII G041"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Load Libraries and the Data
+```{r}
+library(ggplot2) 
+library(data.table) 
+library(magrittr) 
+library(tidyr) 
+library(dplyr) 
+library(GGally)
+library(CombMSC)
+library(readxl) 
+library(ggbeeswarm) 
+library(ggrepel)
+library(pals)
+library(grid)
+library("gridExtra")
+library(patchwork)
+library(ggpubr)
+library(lubridate)
+library(countrycode)
+features <- fread("data/featuresdf.csv")
+daily_ranking <- fread("data/data.csv")
+```
+## Reading files
+```{r}
+data00 <- fread("data/data.csv") %>% as.data.table
+Spotify2017 <- separate(data00, "Date", c("Year", "Month", "Day"), sep = "-", remove = F) # Separating dates
+Spotify2017$year_day <- yday(Spotify2017[["Date"]])
+SpotifyTop100 <- fread("data/featuresdf.csv") %>% as.data.table
+
+```
+
+## Number of Artists
+```{r}
+#We have 6629 artists in Spitify 2017
+length(unique(Spotify2017[,Artist]))
+
+#We have 78 Artists in the top100
+length(unique(SpotifyTop100[,artists]))
+
+sum(unique(Spotify2017[,Artist]) %in% unique(SpotifyTop100[,artists])) # 78 Obviously
+
+
+```
+
+
+## How many times artisits appeared in the top100
+```{r}
+head(SpotifyTop100[,.N, by = artists])
+
+```
+
+## Testing for Correlation between features I
+```{r}
+# A function that tests correlation. Inputs would be audio features and correlation method
+corrAudioFeature <- function(feature1, feature2, method){
+  get_feature1 <- SpotifyTop100[[feature1]]
+  get_feature2 <- SpotifyTop100[[feature2]]
+  if(method == "spearman"){
+  return(cor.test(get_feature1,get_feature2,method = "spearman"))}
+  if(method == "spearman"){
+  return(cor.test(get_feature1,get_feature2,method = "spearman"))}
+} 
+```
+
+## Testing for correlation between feataures II
+```{r}
+# Exploring correlations
+ggcorr(SpotifyTop100, geom = 'circle', params=c(corMethod="spearman"))+ ## Less susciptible to outliers (does not consider distance between values) 
+labs(title='Correlation between features')
+
+# Testing significance
+corrAudioFeature("energy", "loudness", method = "spearman")
+corrAudioFeature("speechiness", "loudness", method = "spearman")
+corrAudioFeature("valence", "loudness",method = "spearman")
+corrAudioFeature("danceability", "tempo", method = "spearman")
+corrAudioFeature("danceability", "valence", method = "spearman")
+
+
+plot(SpotifyTop100[["tempo"]], SpotifyTop100[["danceability"]]) ## I will add the correlation value and p value and method to the plots, with cor line
+plot(SpotifyTop100[["loudness"]], SpotifyTop100[["energy"]])
+plot(SpotifyTop100[["loudness"]], SpotifyTop100[["valence"]])
+plot(SpotifyTop100[["danceability"]], SpotifyTop100[["Tempo"]])
+plot(SpotifyTop100[["danceability"]], SpotifyTop100[["Valence"]])
+```
+
+## Is there a relationship between average postion and number of streams
+```{r}
+exclGlobal <- filter(Spotify2017, Region != "global") %>% as.data.table
+# Coerce character (Position) into numeric
+exclGlobal1 <- exclGlobal[,Position := as.numeric(Position)]
+
+#Table 
+streams_position <-merge(exclGlobal1[,sum(Streams, na.rm = T), by = "URL"],
+      exclGlobal1[,mean(Position, na.rm = T), by = "URL"],
+      by = "URL") %>% as.data.table
+setnames(streams_position, c("V1.x", "V1.y"), c("total_streams", "average_position"))
+# All top songs are from Turkey, They were ranked once and had Position = 1
+tr <- filter(exclGlobal1,Region == "tr") # Global Region does not include them
+head(streams_position[order(average_position)])
+
+```
+Results
+Some songs have an average position of 1 due to the fact that they have only been ranked once in their region. Checking for these songs in the Global Region and it seems that they have been elimenated. 
+
+## Is there a relationship between average postion and number of streams (Using Global data)
+```{r}
+OnlyGlobal <- filter(Spotify2017, Region == "global") %>% as.data.table
+OnlyGlobal1 <- OnlyGlobal[,Position := as.numeric(Position)]
+
+#Table 
+streams_positionG <-merge(OnlyGlobal1[,sum(Streams, na.rm = T), by = "URL"],
+      OnlyGlobal1[,mean(Position, na.rm = T), by = "URL"],
+      by = "URL") %>% as.data.table
+setnames(streams_positionG, c("V1.x", "V1.y"), c("total_streams", "average_position"))
+
+
+ggplot(streams_positionG, aes(average_position, total_streams))+
+  geom_point()+
+  geom_smooth(method = "lm")+
+  labs(title = "Negative relationship between the number of streams average position")
+
+```
+There is a negative relationship between the total streams and the average position
+
+## Relationship between average position and number of appearences
+```{r}
+# The higher the number of appearences, the higher the number of streams?
+streams_position <-merge(exclGlobal1[,sum(Streams, na.rm = T), by = "URL"],
+      exclGlobal1[,mean(Position, na.rm = T), by = "URL"],
+      by = "URL") %>% as.data.table
+
+streams_positionG <-merge(OnlyGlobal1[,sum(Streams, na.rm = T), by = "URL"],
+      OnlyGlobal1[,mean(Position, na.rm = T), by = "URL"],
+      by = "URL") %>% as.data.table
+setnames(streams_positionG, c("V1.x", "V1.y"), c("total_streams", "average_position"))
+
+streams_positionG_app <- merge(streams_positionG, OnlyGlobal1[,.N, by = "URL"], by = "URL")
+
+cor.test(streams_positionG_app[["N"]], streams_positionG_app[["total_streams"]])
+
+ggplot(streams_positionG_app, aes(N, total_streams))+
+  geom_point()+
+  geom_smooth(method = "lm")+
+  labs(title='Number of apprearances in top 200 and the number of streams', x='Number of appearances in top 200', y='Number of streams') # Requires log transformation
+
+## Also suffers form Heterogious heterogeneity
+
+```
+Results Positive correlation between number of appearances and Number of streams
+
+## How do songs resist on the top 10 (How many times Tracks appeared in top 10)
+```{r}
+top10 <- filter(OnlyGlobal1, Position < 11) %>% as.data.table
+head(top10[,.N, `Track Name`])
+top10significant <- filter(top10[,.N,`Track Name`], N>9)
+setnames(top10significant, "Track Name", "Track_Name")
+
+top10significant[top10significant$Track_Name=='I Donâ€™t Wanna Live Forever (Fifty Shades Darker) - From ""Fifty Shades Darker (Original Motion Picture Soundtrack)""', "Track_Name"] <- 'I Dont Wanna Live Forever(Fifty Shades Darker)'
+
+ggplot(top10significant, aes(Track_Name, N))+
+  geom_bar(stat= "identity")+
+  labs(title = "")+
+  theme(axis.text=element_text(size=10),
+        axis.text.x = element_text(angle = -60, vjust = -1))
+  
+  
+  #theme(axis.text.x = element_text(angle = -60))
+  
+top10significant[top10significant$Track_Name=='I Donâ€™t Wanna Live Forever (Fifty Shades Darker) - From ""Fifty Shades Darker (Original Motion Picture Soundtrack)""', "Track_Name"] <- 'I Dont Wanna Live Forever(Fifty Shades Darker)'
+```
+Results
+"Something just like this" by The Chainsmokers has maintained it's position in the Top 10 the most number of times
+
+## Number of streams per artist
+```{r}
+streams_artist <- OnlyGlobal1[,sum(Streams), by = "Artist"]
+head(streams_artist[order(-V1)])
+
+# With more than 1,000,000,000 views
+streams_artist_billion <- filter(streams_artist[order(-V1)], V1 > 1000000000)
+
+ggplot(streams_artist_billion, aes(Artist, V1/1000000000))+
+  geom_bar(stat = "identity")+
+    labs(title = "Streams per artists in Billions", y = "Streams in billions")+
+  theme(axis.text=element_text(size=10),
+        axis.text.x = element_text(angle = -60, vjust = -1))
+  
+```
+Results 
+Ed Sheeran smashed it
+
+
+Continent Analysis I
+```{r}
+Continent <- countrycode(exclGlobal1[["Region"]], origin ="genc2c", destination = "continent")
+WithContinent <- cbind(Continent, exclGlobal1) %>% as.data.table
+
+continent_similarity_Matrix <- function(TopN = 10, ArtistOrSong = "song" ,NumberOrRatio = "number"){
+  WithContinentTopN <- filter(WithContinent, Position <TopN ) %>% as.data.table
+
+  if(ArtistOrSong == "song" & NumberOrRatio == "number"){
+  continent_similarityTopN_CommonSongs <- data.table(Region = c("Americas", "Europe"," Asia", "Oceania", "Global"), ## Columns
+Americas =
+c(length(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Europe" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Asia" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)] %in% OnlyGlobal1[, unique(Artist)])),
+Europe =
+c(sum(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Europe" , unique(`Track Name`)]),
+length(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)] %in% OnlyGlobal1[, unique(Artist)])),
+Asia = c(sum(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Asia" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Asia" , unique(`Track Name`)]),
+length(WithContinentTopN[Continent == "Asia" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Asia" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)]),  
+sum(WithContinentTopN[Continent == "Asia" , unique(`Track Name`)] %in% OnlyGlobal1[, unique(`Track Name`)])),
+Oceania =
+c(sum(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Asia" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)]),
+length(WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)] %in% OnlyGlobal1[, unique(`Track Name`)])))
+
+  list(continent_similarityTopN_CommonSongs)
+  }
+  
+  else if(NumberOrRatio == "ratio" & ArtistOrSong == "song"){
+  continent_similarityTopN_CommonSongsR <- data.table(Region = c("Americas", "Europe"," Asia", "Oceania", "Global"), ## Columns
+Americas =
+c(length(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)])/
+    length(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Europe" , unique(`Track Name`)])/
+  length(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Asia" , unique(`Track Name`)])/
+  length(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)])/
+  length(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)] %in% OnlyGlobal1[, unique(`Track Name`)])/
+  length(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)])),
+Europe =
+c(sum(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Europe" , unique(`Track Name`)])/
+    length(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)]),
+length(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)])/
+  length(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)])/
+  length(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)])/
+  length(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)] %in% OnlyGlobal1[, unique(`Track Name`)])/
+  length(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)])),
+Asia = 
+c(sum(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Asia" , unique(Artist)])/length(WithContinentTopN[Continent == "Asia" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Asia" , unique(Artist)])/length(WithContinentTopN[Continent == "Asia" , unique(`Track Name`)]),
+length(WithContinentTopN[Continent == "Asia" , unique(`Track Name`)])/
+  length(WithContinentTopN[Continent == "Asia" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Asia" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)])/
+  length(WithContinentTopN[Continent == "Asia" , unique(`Track Name`)]),  
+sum(WithContinentTopN[Continent == "Asia" , unique(`Track Name`)] %in% OnlyGlobal1[, unique(`Track Name`)])/
+length(WithContinentTopN[Continent == "Asia" , unique(`Track Name`)])),
+Oceania =
+c(sum(WithContinentTopN[Continent == "Americas" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)])/
+    length(WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)])/
+  length(WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Asia" , unique(`Track Name`)] %in% WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)])/
+  length(WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)]),
+length(WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)])/
+  length(WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)]),
+sum(WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)] %in% OnlyGlobal1[, unique(`Track Name`)])/
+  length(WithContinentTopN[Continent == "Oceania" , unique(`Track Name`)])))
+  
+  list(continent_similarityTopN_CommonSongsR)
+  }
+  
+  else if(NumberOrRatio == "number" & ArtistOrSong == "artist"){
+    
+    continent_similarityTopN_CommonArtist <- data.table(Region = c("Americas", "Europe"," Asia", "Oceania", "Global"), ## Columns
+Americas =
+c(length(WithContinentTopN[Continent == "Americas" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(Artist)] %in% WithContinentTopN[Continent == "Europe" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(Artist)] %in% WithContinentTopN[Continent == "Asia" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(Artist)] %in% WithContinentTopN[Continent == "Oceania" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(Artist)] %in% OnlyGlobal1[, unique(Artist)])),
+Europe =
+c(sum(WithContinentTopN[Continent == "Americas" , unique(Artist)] %in% WithContinentTopN[Continent == "Europe" , unique(Artist)]),
+length(WithContinentTopN[Continent == "Europe" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(Artist)] %in% WithContinentTopN[Continent == "Oceania" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(Artist)] %in% WithContinentTopN[Continent == "Oceania" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(Artist)] %in% OnlyGlobal1[, unique(Artist)])),
+Asia = c(sum(WithContinentTopN[Continent == "Americas" , unique(Artist)] %in% WithContinentTopN[Continent == "Asia" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(Artist)] %in% WithContinentTopN[Continent == "Asia" , unique(Artist)]),
+length(WithContinentTopN[Continent == "Asia" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Asia" , unique(Artist)] %in% WithContinentTopN[Continent == "Oceania" , unique(Artist)]),  
+sum(WithContinentTopN[Continent == "Asia" , unique(Artist)] %in% OnlyGlobal1[, unique(Artist)])),
+Oceania =
+c(sum(WithContinentTopN[Continent == "Americas" , unique(Artist)] %in% WithContinentTopN[Continent == "Oceania" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(Artist)] %in% WithContinentTopN[Continent == "Oceania" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Asia" , unique(Artist)] %in% WithContinentTopN[Continent == "Oceania" , unique(Artist)]),
+length(WithContinentTopN[Continent == "Oceania" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Oceania" , unique(Artist)] %in% OnlyGlobal1[, unique(Artist)])))
+      
+      list(continent_similarityTopN_CommonArtist)
+      }
+ else if(NumberOrRatio == "ratio" & ArtistOrSong == "artist"){
+  
+  continent_similarityTopN_CommonArtistR <- data.table(Region = c("Americas", "Europe"," Asia", "Oceania", "Global"), ## Columns
+Americas =
+c(length(WithContinentTopN[Continent == "Americas" , unique(Artist)])/
+    length(WithContinentTopN[Continent == "Americas" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(Artist)] %in% WithContinentTopN[Continent == "Europe" , unique(Artist)])/
+  length(WithContinentTopN[Continent == "Americas" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(Artist)] %in% WithContinentTopN[Continent == "Asia" , unique(Artist)])/
+  length(WithContinentTopN[Continent == "Americas" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(Artist)] %in% WithContinentTopN[Continent == "Oceania" , unique(Artist)])/
+  length(WithContinentTopN[Continent == "Americas" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Americas" , unique(Artist)] %in% OnlyGlobal1[, unique(Artist)])/
+  length(WithContinentTopN[Continent == "Americas" , unique(Artist)])),
+Europe =
+c(sum(WithContinentTopN[Continent == "Americas" , unique(Artist)] %in% WithContinentTopN[Continent == "Europe" , unique(Artist)])/
+    length(WithContinentTopN[Continent == "Europe" , unique(Artist)]),
+length(WithContinentTopN[Continent == "Europe" , unique(Artist)])/
+  length(WithContinentTopN[Continent == "Europe" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(Artist)] %in% WithContinentTopN[Continent == "Oceania" , unique(Artist)])/
+  length(WithContinentTopN[Continent == "Europe" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(Artist)] %in% WithContinentTopN[Continent == "Oceania" , unique(Artist)])/
+  length(WithContinentTopN[Continent == "Europe" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(Artist)] %in% OnlyGlobal1[, unique(Artist)])/
+  length(WithContinentTopN[Continent == "Europe" , unique(Artist)])),
+Asia = 
+c(sum(WithContinentTopN[Continent == "Americas" , unique(Artist)] %in% WithContinentTopN[Continent == "Asia" , unique(Artist)])/length(WithContinentTopN[Continent == "Asia" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(Artist)] %in% WithContinentTopN[Continent == "Asia" , unique(Artist)])/length(WithContinentTopN[Continent == "Asia" , unique(Artist)]),
+length(WithContinentTopN[Continent == "Asia" , unique(Artist)])/
+  length(WithContinentTopN[Continent == "Asia" , unique(Artist)]),
+sum(WithContinent[Continent == "Asia" , unique(Artist)] %in% WithContinentTopN[Continent == "Oceania" , unique(Artist)])/
+  length(WithContinentTopN[Continent == "Asia" , unique(Artist)]),  
+sum(WithContinentTopN[Continent == "Asia" , unique(Artist)] %in% OnlyGlobal1[, unique(Artist)])/
+length(WithContinentTopN[Continent == "Asia" , unique(Artist)])),
+Oceania =
+c(sum(WithContinentTopN[Continent == "Americas" , unique(Artist)] %in% WithContinentTopN[Continent == "Oceania" , unique(Artist)])/
+    length(WithContinentTopN[Continent == "Oceania" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Europe" , unique(Artist)] %in% WithContinentTopN[Continent == "Oceania" , unique(Artist)])/
+  length(WithContinentTopN[Continent == "Oceania" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Asia" , unique(Artist)] %in% WithContinentTopN[Continent == "Oceania" , unique(Artist)])/
+  length(WithContinentTopN[Continent == "Oceania" , unique(Artist)]),
+length(WithContinentTopN[Continent == "Oceania" , unique(Artist)])/
+  length(WithContinentTopN[Continent == "Oceania" , unique(Artist)]),
+sum(WithContinentTopN[Continent == "Oceania" , unique(Artist)] %in% OnlyGlobal1[, unique(Artist)])/
+  length(WithContinentTopN[Continent == "Oceania" , unique(Artist)])))
+  
+  continent_similarityTopN_CommonArtistR
+  
+  
+  }
+}
+
+continent_similarity_Matrix(5, NumberOrRatio = "number", ArtistOrSong = "artist")
+continent_similarity_Matrix(5, NumberOrRatio = "ratio", ArtistOrSong = "artist")
+continent_similarity_Matrix(20, NumberOrRatio = "number", ArtistOrSong = "song")
+continent_similarity_Matrix(5, NumberOrRatio = "ratio", ArtistOrSong = "song")
+
+
+
+
+```
+
+
+
+
+
+Continent Analysis II
+-A Function that calculates the ratios in the charts between pairs of continents on daily basis
+```{r}
+
+plot_continentSimilarity <- function(TopN = 10, ArtistOrSong = "song"){ 
+  ContinentTopN <- filter(WithContinent, Position < TopN ) %>% as.data.table
+  #Initialise vectors
+  Am_EU_Artist <- c(length = length(WithContinent[,unique(Date)]))
+  Am_As_Artist <- c(length = length(WithContinent[,unique(Date)]))
+  Am_Oc_Artist <- c(length = length(WithContinent[,unique(Date)]))
+  Am_Gl_Artist <- c(length = length(WithContinent[,unique(Date)]))
+  EU_Am_Artist <- c(length = length(WithContinent[,unique(Date)]))
+  EU_As_Artist <- c(length = length(WithContinent[,unique(Date)]))
+  EU_Oc_Artist <- c(length = length(WithContinent[,unique(Date)]))
+  EU_Gl_Artist <- c(length = length(WithContinent[,unique(Date)]))
+  As_Am_Artist <- c(length = length(WithContinent[,unique(Date)]))
+  As_EU_Artist <- c(length = length(WithContinent[,unique(Date)]))
+  As_Oc_Artist <- c(length = length(WithContinent[,unique(Date)]))
+  As_Gl_Artist <- c(length = length(WithContinent[,unique(Date)]))
+  Oc_Am_Artist <- c(length = length(WithContinent[,unique(Date)]))
+  Oc_EU_Artist <- c(length = length(WithContinent[,unique(Date)]))
+  Oc_As_Artist <- c(length = length(WithContinent[,unique(Date)]))
+  Oc_Gl_Artist <- c(length = length(WithContinent[,unique(Date)]))
+ 
+ 
+ date <- WithContinent[,unique(Date)]
+  
+  
+  
+  if(ArtistOrSong == "song"){
+    
+    
+ for(i in 1:length(WithContinent[,unique(Date)])){
+  Am_EU_Artist[i] <- sum(ContinentTopN[Continent == "Americas" & Date == date[i], unique(`Track Name`)] %in% ContinentTopN[Continent == "Europe" & Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Americas" & Date == date[i], unique(`Track Name`)])
+
+ }
+ for(i in 1:length(WithContinent[,unique(Date)])){
+  Am_As_Artist[i] <- sum(ContinentTopN[Continent == "Americas" & Date == date[i], unique(`Track Name`)] %in% ContinentTopN[Continent == "Asia" & Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Americas" & Date == date[i], unique(`Track Name`)])
+
+ }
+  
+ for(i in 1:length(WithContinent[,unique(Date)])){
+  Am_Oc_Artist[i] <- sum(ContinentTopN[Continent == "Americas" & Date == date[i], unique(`Track Name`)] %in% ContinentTopN[Continent == "Oceania" & Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Americas" & Date == date[i], unique(`Track Name`)])
+
+ }
+  for(i in 1:length(WithContinent[,unique(Date)])){
+  Am_Gl_Artist[i] <- sum(ContinentTopN[Continent == "Americas" & Date == date[i], unique(`Track Name`)] %in% OnlyGlobal1[Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Americas" & Date == date[i], unique(`Track Name`)])
+  }
+    
+   for(i in 1:length(WithContinent[,unique(Date)])){
+  EU_Am_Artist[i] <- sum(ContinentTopN[Continent == "Europe" & Date == date[i], unique(`Track Name`)] %in% ContinentTopN[Continent == "Americas" & Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Europe" & Date == date[i], unique(`Track Name`)])
+
+   }
+   for(i in 1:length(WithContinent[,unique(Date)])){
+  EU_As_Artist[i] <- sum(ContinentTopN[Continent == "Europe" & Date == date[i], unique(`Track Name`)] %in% ContinentTopN[Continent == "Asia" & Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Europe" & Date == date[i], unique(`Track Name`)])
+
+   }
+
+   for(i in 1:length(WithContinent[,unique(Date)])){
+  EU_Oc_Artist[i] <- sum(ContinentTopN[Continent == "Europe" & Date == date[i], unique(`Track Name`)] %in% ContinentTopN[Continent == "Oceania" & Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Europe" & Date == date[i], unique(`Track Name`)])
+
+   }
+   for(i in 1:length(WithContinent[,unique(Date)])){
+  EU_Gl_Artist[i] <- sum(ContinentTopN[Continent == "Europe" & Date == date[i], unique(`Track Name`)] %in% OnlyGlobal1[Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Europe" & Date == date[i], unique(`Track Name`)])
+   }
+    
+    
+    
+    for(i in 1:length(WithContinent[,unique(Date)])){
+  As_Am_Artist[i] <- sum(ContinentTopN[Continent == "Asia" & Date == date[i], unique(`Track Name`)] %in% ContinentTopN[Continent == "Americas" & Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Asia" & Date == date[i], unique(`Track Name`)])
+
+    }
+    
+    
+    for(i in 1:length(WithContinent[,unique(Date)])){
+  As_EU_Artist[i] <- sum(ContinentTopN[Continent == "Asia" & Date == date[i], unique(`Track Name`)] %in% ContinentTopN[Continent == "Europe" & Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Asia" & Date == date[i], unique(`Track Name`)])
+
+   }
+    
+    
+    
+   for(i in 1:length(WithContinent[,unique(Date)])){
+  As_Oc_Artist[i] <- sum(ContinentTopN[Continent == "Asia" & Date == date[i], unique(`Track Name`)] %in% ContinentTopN[Continent == "Oceania" & Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Asia" & Date == date[i], unique(`Track Name`)])
+
+   }
+ for(i in 1:length(WithContinent[,unique(Date)])){
+  As_Gl_Artist[i] <- sum(ContinentTopN[Continent == "Asia" & Date == date[i], unique(`Track Name`)] %in% OnlyGlobal1[Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Asia" & Date == date[i], unique(`Track Name`)])
+ }
+    for(i in 1:length(WithContinent[,unique(Date)])){
+  Oc_Am_Artist[i] <- sum(ContinentTopN[Continent == "Oceania" & Date == date[i], unique(`Track Name`)] %in% ContinentTopN[Continent == "Americas" & Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Oceania" & Date == date[i], unique(`Track Name`)])
+
+   }
+
+   for(i in 1:length(WithContinent[,unique(Date)])){
+  Oc_EU_Artist[i] <- sum(ContinentTopN[Continent == "Oceania" & Date == date[i], unique(`Track Name`)] %in% ContinentTopN[Continent == "Europe" & Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Oceania" & Date == date[i], unique(`Track Name`)])
+
+   }  
+  
+   for(i in 1:length(WithContinent[,unique(Date)])){
+  Oc_As_Artist[i] <- sum(ContinentTopN[Continent == "Oceania" & Date == date[i], unique(`Track Name`)] %in% ContinentTopN[Continent == "Asia" & Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Oceania" & Date == date[i], unique(`Track Name`)])
+  
+ }
+ for(i in 1:length(WithContinent[,unique(Date)])){
+  Oc_Gl_Artist[i] <- sum(ContinentTopN[Continent == "Oceania" & Date == date[i], unique(`Track Name`)] %in% OnlyGlobal1[Date == date[i], unique(`Track Name`)])/length(ContinentTopN[Continent == "Oceania" & Date == date[i], unique(`Track Name`)])
+ 
+}
+
+
+table1 <- cbind(Am_EU_Artist, date) %>% as.data.table
+table2 <- cbind(Am_As_Artist, date) %>% as.data.table
+table3 <- cbind(Am_Oc_Artist, date) %>% as.data.table
+table4 <- cbind(Am_Gl_Artist, date) %>% as.data.table
+table5 <- cbind(EU_Am_Artist, date) %>% as.data.table
+table6 <- cbind(EU_As_Artist, date) %>% as.data.table
+table7 <- cbind(EU_Oc_Artist, date) %>% as.data.table
+table8 <- cbind(EU_Gl_Artist, date) %>% as.data.table
+table9 <- cbind(As_Am_Artist, date) %>% as.data.table
+table10 <- cbind(As_EU_Artist, date) %>% as.data.table
+table11 <- cbind(As_Oc_Artist, date) %>% as.data.table
+table12 <- cbind(As_Gl_Artist, date) %>% as.data.table
+table13 <- cbind(Oc_Am_Artist, date) %>% as.data.table
+table14 <- cbind(Oc_EU_Artist, date) %>% as.data.table
+table15 <- cbind(Oc_As_Artist, date) %>% as.data.table
+table16 <- cbind(Oc_Gl_Artist, date) %>% as.data.table
+
+list(
+  ggplot(table1, aes(seq(length(date)), as.numeric(Am_EU_Artist)))+
+  geom_line()+
+    labs(title = "similarity between Americas and Europe", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30)), 
+  
+  ggplot(table2, aes(seq(length(date)), as.numeric(Am_As_Artist)))+
+        labs(title = "similarity between Americas and Asia", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30))+
+    geom_line(), 
+  
+  
+  ggplot(table3, aes(seq(length(date)), as.numeric(Am_Oc_Artist)))+
+    labs(title = "similarity between Americas and Oceania", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30))+
+    geom_line(), 
+  
+  ggplot(table4, aes(seq(length(date)), as.numeric(Am_Gl_Artist)))+
+    labs(title = "similarity between Americas and Global", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30))+
+    geom_line(),
+  
+  ggplot(table5, aes(seq(length(date)), as.numeric(EU_Am_Artist)))+
+    labs(title = "similarity between Europe and Americas", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30))+
+    geom_line(),
+  
+  ggplot(table6, aes(seq(length(date)), as.numeric(EU_As_Artist)))+
+    labs(title = "similarity between Europe and Asia", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30))+
+    geom_line(),
+  
+  ggplot(table7, aes(seq(length(date)), as.numeric(EU_Oc_Artist)))+
+    labs(title = "similarity between Europe and Oceania", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30))+
+    geom_line(),
+  
+  ggplot(table8, aes(seq(length(date)), as.numeric(EU_Gl_Artist)))+
+    labs(title = "similarity between Europe and Global", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30))+
+    geom_line(),
+  
+  ggplot(table9, aes(seq(length(date)), as.numeric(As_Am_Artist)))+
+    labs(title = "similarity between Asia and Americas", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30))+
+    geom_line(),
+  
+  ggplot(table10, aes(seq(length(date)), as.numeric(As_EU_Artist)))+
+    labs(title = "similarity between Asia and Europe", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30))+
+    geom_line(),
+  
+  ggplot(table11, aes(seq(length(date)), as.numeric(As_Oc_Artist)))+
+    labs(title = "similarity between Aisa and Oceania", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30))+
+    geom_line(),
+  
+  ggplot(table12, aes(seq(length(date)), as.numeric(As_Gl_Artist)))+
+    labs(title = "similarity between Asia and Global", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30))+
+    geom_line(),
+  
+  ggplot(table13, aes(seq(length(date)), as.numeric(Oc_Am_Artist)))+
+    labs(title = "similarity between Oceania and Americas", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30))+
+    geom_line(),
+  
+  ggplot(table14, aes(seq(length(date)), as.numeric(Oc_EU_Artist)))+
+    labs(title = "similarity between Oceania and Europe", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30))+
+    geom_line(),
+  
+  ggplot(table15, aes(seq(length(date)), as.numeric(Oc_As_Artist)))+
+    labs(title = "similarity between Oceania and Asia", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30))+
+    geom_line(),
+ 
+  ggplot(table16, aes(seq(length(date)), as.numeric(Oc_Gl_Artist)))+
+    labs(title = "similarity between Oceania and Global", 
+         x = "Days starting from 01-01-2017", y = "Ratio of Songs in common")+
+  scale_y_continuous(limits = c(0,1))+
+  scale_x_continuous(breaks = seq(0,380,30))+
+    geom_line())
+
+
+}
+ 
+ 
+ 
+  }
+   
+plot_continentSimilarity(TopN = 50, "song")
+
+
+```
+Results
+- High similarity occur between Oceania and Europ
+
+## Weekly Pattern in Daily Count
+In the graph below one can see the total number of daily streams (in the global region). There seems to be a weekly pattern, since there are 4 peeks per month. However, one has to investigate that further after adding the weekday information to the data. Furthermore one can see a huge peek in december.
+```{r}
+unique(daily_ranking$Region)
+daily_count <- daily_ranking%>% group_by(Date) %>% summarise(n_appearance = n())
+
+gl_daily_ranking <- daily_ranking[daily_ranking$Region == "global"]
+daily_count <- aggregate(gl_daily_ranking$Streams, by= list(Category = gl_daily_ranking$Date), FUN = sum)
+colnames(daily_count) <- c("Date", "n_streams")
+daily_count$Date<- as.Date(daily_count$Date)
+daily_count <- as.data.table(daily_count)
+colnames(daily_count)
+ggplot(daily_count, aes(x = Date, y = n_streams)) +     
+  geom_line() +
+  labs(title = "Daily streams", x = "Date", y = "Number of streams") +
+  scale_x_date(date_breaks = "months", date_labels = "%b-%y") +
+  theme(axis.text.x = element_text(angle=90))
+
+```
+```{r}
+daily_count[daily_count$n_streams == max(daily_count$n_streams),]
+head(daily_count[order(-n_streams)])
+daily_count[daily_count$Date=="2017-12-24"]
+
+```
+The peak in December was Christmas (and that year Christmas was a Sunday). But also the days around Christmas have a comparatively high number of streams.
+
+
+```{r}
+head(daily_count)
+dim(daily_count)
+max(daily_count$Date)
+date_range <- seq(min(daily_count$Date), max(daily_count$Date), by = 1) 
+date_range[!date_range %in% daily_count$Date] 
+# Check whether length of vector makes sense:
+365 + 9 - 5 == 369
+```
+Five dates are missing (2017-02-23, 2017-03-06, 2017-05-30, 2017-05-31, 2017-06-02). In total we have 369 days with corresponding counts.
+
+```{r}
+# Add Weekday column
+Sys.setlocale("LC_TIME", "English")
+daily_count <- cbind(daily_count, Weekday = weekdays(daily_count$Date))
+head(daily_count)
+```
+Plotting the number of streams for each weekday: 
+```{r}
+# Violinplot the n_appearance for each Weekday
+
+ggplot(daily_count, aes(x=factor(Weekday, c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"), ordered = TRUE), y=n_streams)) + geom_violin() + labs(x = "Weekday", y = "Number of Streams") + theme(axis.title = element_text(size=15))
+
+# Remember: Christmas was a Sunday
+```
+During Sundays the appearance seems to be a lot lower than during i.e. Fridays. Let's see whether the number of appearances is being significantly influenced by the weekday. First, check whether normality holds: 
+
+```{r}
+# Checking the normality assumption
+library(ggpubr)
+
+ggqqplot(daily_count$n_streams) 
+shapiro.test(daily_count$n_streams) # not normally distributed
+
+ggqqplot(daily_count[Weekday == 'Monday']$n_streams)
+shapiro.test(daily_count[Weekday == 'Monday']$n_streams) # not normally distributed
+
+ggqqplot(daily_count[Weekday == 'Tuesday']$n_streams)
+shapiro.test(daily_count[Weekday == 'Tuesday']$n_streams) # not normally distributed
+
+ggqqplot(daily_count[Weekday == 'Wednesday']$n_streams)
+shapiro.test(daily_count[Weekday == 'Wednesday']$n_streams) # normally distributed
+
+ggqqplot(daily_count[Weekday == 'Thursday']$n_streams)
+shapiro.test(daily_count[Weekday == 'Thursday']$n_streams) # normally distributed!
+
+ggqqplot(daily_count[Weekday == 'Friday']$n_streams)
+shapiro.test(daily_count[Weekday == 'Friday']$n_streams) # normally distributed!
+
+ggqqplot(daily_count[Weekday == 'Saturday']$n_streams)
+shapiro.test(daily_count[Weekday == 'Saturday']$n_streams) # normally distributed
+
+ggqqplot(daily_count[Weekday == 'Sunday']$n_streams)
+shapiro.test(daily_count[Weekday == 'Sunday']$n_streams) # not normally distributed
+```
+Not all of the data is normally distributed. We therefore use a pairwise wilcoxon test (with bonferroni correction).
+
+```{r}
+pairwise.wilcox.test(x=daily_count$n_streams, g=daily_count$Weekday, p.adjust.method = "bonferroni")
+```
+
+The wilcoxon test suggests that the difference from Fridays to all the other days is significant, the same counts for Sundays. Considering the remaining 5 days this cannot be said. Therefore, we introduce a new factor differentiating between Fridays, Sundays and any Other Day. We then do the same analysis as before.
+
+```{r}
+head(daily_count)
+
+FriSunOther <- rep(0, length(daily_count$Weekday))
+FriSunOther[daily_count$Weekday == "Friday"] <- 1
+FriSunOther[daily_count$Weekday == "Sunday"] <- 2
+FriSunOther <- as.factor(FriSunOther)
+levels(FriSunOther) <- c("Other", "Friday", "Sunday")
+
+daily_count$Fri_Sun_Other <- FriSunOther
+head(daily_count)
+
+ggplot(daily_count, aes(x=Fri_Sun_Other, y=n_streams)) + geom_violin() + labs(x = "Weekday", y = "Number of Streams") + theme(axis.title = element_text(size=15))
+
+```
+
+```{r}
+# checking for normality once more
+
+ggqqplot(daily_count[Fri_Sun_Other == 'Other']$n_streams)
+shapiro.test(daily_count[Fri_Sun_Other == 'Other']$n_streams)
+
+ggqqplot(daily_count[Fri_Sun_Other == 'Friday']$n_streams)
+shapiro.test(daily_count[Fri_Sun_Other == 'Friday']$n_streams)
+
+ggqqplot(daily_count[Fri_Sun_Other == 'Sunday']$n_streams)
+shapiro.test(daily_count[Fri_Sun_Other == 'Sunday']$n_streams)
+
+# only Friday normally distributed
+```
+
+```{r}
+# wilcox test
+pairwise.wilcox.test(x=daily_count$n_streams, g=daily_count$Fri_Sun_Other, p.adjust.method = "bonferroni")
+```
+
+We can conclude that the probability of randomly drawing a higher number of streams of a specific day depends on the day of the week (meaning Friday, Sunday or Other).
+
+## Loading data
+Loading data  + libraries
+```{r}
+ranks <- fread("data/data.csv")
+top17 <- fread("data/featuresdf.csv")
+ranks <- as.data.table(ranks)
+top17 <- as.data.table(top17)
+
+#loading flights
+flights <- fread("data/flightsLAX.csv")
+flights <- as.data.table(flights)
+```
+
+## TOP 100 songs of 2017 
+Features: \
+- Danceability describes how suitable a track is for dancing \
+- Energy represents a perceptual measure of intensity and activity (0-1)\
+- The key the track is in (pitch) \
+- The overall loudness of a track in decibels (dB) \
+- Mode indicates the modality (major or minor) of a track \
+- Speechiness detects the presence of spoken words in a track \
+- A confidence measure whether the track is acoustic (0-1) \
+- Predicts whether a track contains no vocals. "Ooh" and "aah" sounds are treated as instrumental in this context \
+- Liveness detects the presence of an audience in the recording \
+- Valence is describing the musical positiveness conveyed by a track (0-1) \
+- The overall estimated tempo of a track in beats per minute (BPM) \
+- The duration of the track in milliseconds \
+- An estimated overall time signature of a track 
+
+### Correlation between features
+We plotted the pearson and spearman correlation and tested the pairs with the biggest circles by cor.test, choosing the type according to the result of the normality test.
+```{r}
+ggcorr(top17[,-c(1,2,3)], geom= "circle", corMethod="spearman")
+ggcorr(top17[,-c(1,2,3)], geom= "circle", corMethod="pearson")
+
+#normality tests
+qqnorm(top17[,energy]); qqline(top17[,energy], col = 2)
+ks.test(top17[,energy], pnorm, mean=mean(top17[,energy]), sd=sd(top17[,energy]))
+shapiro.test(top17[,energy])
+
+qqnorm(top17[,loudness]); qqline(top17[,loudness], col = 2)
+ks.test(top17[,loudness], pnorm, mean=mean(top17[,loudness]), sd=sd(top17[,loudness]))
+shapiro.test(top17[,loudness])
+
+qqnorm(top17[,speechiness]); qqline(top17[,speechiness], col = 2)
+ks.test(top17[,speechiness], pnorm, mean=mean(top17[,speechiness]), sd=sd(top17[,speechiness]))
+shapiro.test(top17[,speechiness])
+
+qqnorm(top17[,danceability]); qqline(top17[,danceability], col = 2)
+ks.test(top17[,danceability], pnorm, mean=mean(top17[,danceability]), sd=sd(top17[,danceability]))
+shapiro.test(top17[,danceability])
+
+qqnorm(top17[,valence]); qqline(top17[,valence], col = 2)
+ks.test(top17[,valence], pnorm, mean=mean(top17[,valence]), sd=sd(top17[,valence]))
+shapiro.test(top17[,valence])
+
+#not normal - spearman cor.test
+cor(top17[,energy], top17[,loudness])
+cor.test(top17[,energy], top17[,loudness], method = "spearman")
+
+cor(top17[,speechiness], top17[,loudness])
+cor.test(top17[,speechiness], top17[,loudness], method = "spearman")
+
+cor(top17[,valence], top17[,tempo])
+cor.test(top17[,valence], top17[,tempo], method = "spearman")
+
+cor(top17[,danceability], top17[,tempo])
+cor.test(top17[,danceability], top17[,tempo], method = "spearman")
+```
+Results: \
+- only valence normal \
+- energy and loudness - high correlation 0.71 - significant \
+- speechiness and loudness - cor -0.44 - not significant \
+- valence, tempo - cor -0.29 - significant \
+- danceability and tempo - cor -0.36 - significant \
+
+### Prediction of a feature based on the others - linear regression
+We chose a danceability as a response and fitted the model based on the other features. We checked the plots and performed also forward selection to find the best model and then compared it with the previous one.
+```{r}
+#model fit
+model_dance <- lm(danceability ~ ., data=top17[, -c(1,2,3)])
+summary(model_dance)
+#plots and normality
+plot(model_dance)
+plot(top17[,danceability], model_dance$fitted.values)
+shapiro.test(resid(model_dance))
+
+#step selection
+attach(top17)
+null <- formula("danceability ~ 1")
+full <- formula("danceability ~ .") 
+modelik_dance <- step(lm(null), direction="forward", scope = list(upper=lm(full, data=top17[, -c(1,2,3)])))
+summary(modelik_dance)
+#plots and normality
+plot(modelik_dance)
+shapiro.test(resid(modelik_dance))
+plot(top17[,danceability], modelik_dance$fitted.values)
+
+anova(modelik_dance, model_dance)
+```
+Results for explaining danceability: \
+- null model not better than the one with all explanatory variables - features \
+- the model with all features suitable, but there could be better - only few significant, residuals good, QQ quite good - test normality of residuals confirmed normality, cooks distance good \
+- model from AIC forward selection - the beter one (F stat) - Rsquared not so much lower,  adjusted Rsquared higher, plots almost the same - but normality of residuals rejected,  more of the features significant, according to anova - better then the previous one \
+- explaining variables - valence, tempo, speechiness, energy \
+- valence and tempo significant \
+
+### Prediction of a feature based on the others 2 - linear regression
+Then we chose an energy as a response and fitted the model based on the other features. We checked the plots and performed also forward selection to find the best model and then compared it with the previous one.
+```{r}
+#model fit
+model_energy <- lm(energy ~ ., data=top17[, -c(1,2,3)])
+summary(model_energy)
+#plots and normality
+plot(model_energy)
+shapiro.test(resid(model_energy))
+plot(top17[,energy], model_energy$fitted.values)
+
+#step selection
+attach(top17)
+null <- formula("energy ~ 1")
+full <- formula("energy ~ .") 
+modelik_energy <- step(lm(null), direction="forward", scope = list(upper=lm(full, data=top17[, -c(1,2,3)])))
+summary(modelik_energy)
+#plots and normality
+plot(modelik_energy)
+shapiro.test(resid(modelik_energy))
+plot(top17[,energy], modelik_energy$fitted.values)
+
+anova(modelik_energy, model_energy)
+```
+Results for explaining energy: \
+- null model not better than the one with all explanatory variables - features \
+- the model with all features suitable, but there could be better - only few significant, residuals good, QQ good - test normality of residuals confirmed normality, cooks distance good - no violation \
+- model from AIC forward selection - the beter one (F stat)- Rsquared not so much lower,  adjusted Rsquared higher, plots almost the same -  normality of residuals,  more of the features significant, according to anova - better then the previous one \
+- explaining variables - valence, danceability, speechiness, key, time sig, instrumentalness, acousticness, loudness \
+- loudness, instrumentalness and danceability significant \
+
+### Why streamed?
+For the top 100 songs we looked on the distribution of features - if they are so positive 
+```{r}
+hist(danceability)
+hist(energy)
+hist(key)
+hist(loudness)
+hist(mode)
+hist(speechiness)
+hist(acousticness)
+hist(instrumentalness)
+hist(liveness)
+hist(valence)
+hist(tempo)
+```
+Results: \
+- danceability, loudness  - skewed to the high values \
+- speechiness, acousticness, liveness - skewed to the lower values \
+
+## RANKS of songs per day and region \
+We took a closer look on the global ranking. Anc counted how many days were songs or artist in the top 1/3/10 and plotted the histograms.
+```{r}
+colnames(ranks) <- c("Position", "Track.Name", "Artist", "Streams", "URL", "Date", "Region")
+top3 <- ranks[(Position<4 & Region=="global"), ]
+
+# n. days for artist being in top 1
+top1 <- top3[Position==1,]
+artist1 <- top1[, .N, by="Artist"]
+artist1
+ggplot(artist1, aes(Artist, N)) + 
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=10)) + 
+  labs(y="Days in top 1")
+
+# n. days for song being in top 1
+song1 <- top1[, .N, by="Track.Name"]
+song1
+ggplot(song1, aes(Track.Name, N)) + 
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=10)) + 
+  labs(y="Days in top 1")
+
+# n. days for artist being in top 3
+artist3 <- top3[, .N, by="Artist"]
+artist3
+ggplot(artist3, aes(Artist, N)) + 
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=10)) + 
+  labs(y="Days in top 3")
+
+# n. days for song being in top 3
+song3 <- top3[, .N, by="Track.Name"]
+song3
+ggplot(song3[N>50], aes(Track.Name, N)) + 
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=10)) + 
+  labs(y="Days in top 3")
+
+#top 10
+top10 <- ranks[(Position<11 & Region=="global"),]
+
+# n. days for artist being in top 10
+artist10 <- top10[, .N, by="Artist"]
+artist10
+ggplot(artist10[N>100], aes(Artist, N)) + 
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=10)) + 
+  labs(y="Days in top 10")
+
+# n. days for song being in top 10
+song10 <- top10[, .N, by="Track.Name"]
+song10
+ggplot(song10[N>100], aes(Track.Name, N)) + 
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=10)) + 
+  labs(y="Days in top 10")
+```
+Results: \
+Artists \
+- Post Malone, Ed Sheeran, Luis Fronsi - mostly in top 1 \
+- Ed Sheeran, DJ Khaled, Luis Fronsi - mostly in top 3 \
+- Ed Sheeran, Luis Fronsi, Chainsmokers - mostly in top 10 \
+Songs \
+- Rockstar, Shape of you, Despacito - mostly in top 1 \
+- Rockstar, Shape of you, Despacito - mostly in top 3 \
+- Shape of you, New Rules, Despacito - mostly in top 10 \
+
+### Comparing to flightsLAX data table
+Just for fun, we tested the correlation of number of flights from and to LA per day with the number of streams in USA per day/or globally. And made plots.
+```{r}
+#converting to day of a year, removing 2018
+ranks_helping <- separate(ranks, col=Date, into=c("year", "month", "day"), sep="-")
+ranks_helping <- ranks_helping[year==2017]
+ranks_helping <- unite(ranks_helping, "Date", c("year", "month", "day"), sep="-")
+head(ranks_helping)
+dayofyear <- strptime(ranks_helping$Date, format="%Y-%m-%d")$yday + 1
+ranksday  <- cbind(ranks_helping, dayofyear)
+head(ranksday)
+
+flights <- unite(flights, "Date", c("YEAR", "MONTH", "DAY"), sep="-")
+dayofyeaar <- strptime(flights$Date, format="%Y-%m-%d")$yday + 1
+flightsday <- cbind(flights, dayofyeaar)
+head(flightsday)
+
+#counting N of flights and streams - USA/global
+global <- ranksday[Region=="global"]
+global <- global[, sum(Streams), by=dayofyear]
+us <- ranksday[Region=="us"]
+us <- us[, sum(Streams), by=dayofyear]
+flighty <- flightsday[, .N, by=dayofyeaar]
+
+#plotting - separately
+ggplot(global, aes(dayofyear, V1)) + 
+  geom_line()+ 
+  labs(y="Number of streams Global")
+ggplot(us, aes(dayofyear, V1)) + 
+  geom_line()+ 
+  labs(y="Number of streams USA")
+ggplot(flighty, aes(dayofyeaar, N)) + 
+  geom_line()+ 
+  labs(y="Number of flights")
+plot(global$dayofyear, global$V1)
+plot(us$dayofyear, us$V1)
+plot(flighty$dayofyeaar, flighty$N)
+
+#choosing only common days - different data sets - flights missing October
+flightyg <- flighty[dayofyeaar %in% global$dayofyear]
+flightys <- flighty[dayofyeaar %in% us$dayofyear]
+global <- global[dayofyear %in% flighty$dayofyeaar]
+us <- us[dayofyear %in% flighty$dayofyeaar]
+
+#plotting again
+ggplot(global, aes(dayofyear, V1)) + 
+  geom_line()+ 
+  labs(y="Number of streams Global")
+ggplot(us, aes(dayofyear, V1)) + 
+  geom_line()+ 
+  labs(y="Number of streams USA")
+ggplot(flightyg, aes(dayofyeaar, N)) + 
+  geom_line()+ 
+  labs(y="Number of flights")
+ggplot(flightys, aes(dayofyeaar, N)) + 
+  geom_line()+ 
+  labs(y="Number of streams")
+
+# normality tests
+qqnorm(global$V1)
+qqnorm(us$V1)
+qqnorm(flightys$N)
+qqnorm(flightyg$N)
+
+# not normal - spearman
+cor(global$V1, flightyg$N, method = "spearman")
+cor(us$V1, flightys$N, method = "spearman")
+cor.test(global$V1, flightyg$N, method = "spearman")
+cor.test(us$V1, flightys$N, method = "spearman")
+
+#plotting them together + scaling
+mergka <- cbind(us,flightys)
+mergka <- as.data.table(mergka)
+mergka$V1 <- (mergka$V1 - mean(mergka$V1))/sd(mergka$V1)
+mergka$N <- (mergka$N - mean(mergka$N))/sd(mergka$N)
+
+ggplot(mergka, aes(x=dayofyeaar)) + 
+  geom_line(aes(y=V1, color="blue")) +
+  geom_line(aes(y=N, color="red"))+ 
+  labs(y="Number of streams USA - red / flights - blue")+ 
+  theme(legend.position = "none")
+ggplot(mergka, aes(x=dayofyeaar)) + 
+  geom_point(aes(y=V1, color="blue")) +
+  geom_point(aes(y=N, color="red"))+ 
+  labs(y="Number of streams USA - red / flights - blue")+ 
+  theme(legend.position = "none")
+```
+Results: \
+- correlation between number of flights and number of USA streams = -0.113 significant !!! \
+- correlation between number of flights and number of global streams = -0.036 not significant \
+
+### Comparing to flightsLAX data table - monthly
+We did the same as in the previous part, but with months. 
+```{r}
+#converting to month
+monthR <- month(as.POSIXlt(ranks_helping$Date, format="%Y-%m-%d"))
+ranksmonth  <- cbind(ranks_helping, monthR)
+
+monthF <-  month(as.POSIXlt(flights$Date, format="%Y-%m-%d"))
+flightsmonth <- cbind(flights, monthF)
+
+#counting numbers and adjusting to the same amount of months - Missing october in flights
+global_m <- ranksmonth[Region=="global"]
+global_m <- global_m[, sum(Streams), by=monthR]
+global_m <- global_m[-10, ]
+us_m <- ranksmonth[Region=="us"]
+us_m <- us_m[, sum(Streams), by=monthR]
+us_m <- us_m[-10, ]
+
+flighty_m <- flightsmonth[, .N, by=monthF]
+
+#plotting
+ggplot(global_m, aes(monthR, V1)) + 
+  geom_line()+ 
+  labs(y="Number of streams Global", x="Month")
+ggplot(us_m, aes(monthR, V1)) + 
+  geom_line()+ 
+  labs(y="Number of streams USA", x="Month")
+ggplot(flighty_m, aes(monthF, N)) + 
+  geom_line()+ 
+  labs(y="Number of flights", x="Month")
+
+#correlation
+cor(global_m$V1, flighty_m$N, method = "spearman")
+cor(us_m$V1, flighty_m$N, method = "spearman")
+cor.test(global_m$V1, flighty_m$N, method = "spearman")
+cor.test(us_m$V1, flighty_m$N, method = "spearman")
+
+#plotting USA streams and flights + scaling
+mergka_m <- cbind(us_m,flighty_m)
+mergka_m <- as.data.table(mergka_m)
+
+mergka_m$V1 <- (mergka_m$V1 - mean(mergka_m$V1))/sd(mergka_m$V1)
+mergka_m$N <- (mergka_m$N - mean(mergka_m$N))/sd(mergka_m$N)
+
+ggplot(mergka_m, aes(x=monthR)) + 
+  geom_line(aes(y=V1, color="blue")) +
+  geom_line(aes(y=N, color="red"))
+
+#plotting Global streams and flights + scaling
+mergka2_m <- cbind(global_m,flighty_m)
+mergka2_m <- as.data.table(mergka2_m)
+
+mergka2_m$V1 <- (mergka2_m$V1 - mean(mergka2_m$V1))/sd(mergka2_m$V1)
+mergka2_m$N <- (mergka2_m$N - mean(mergka2_m$N))/sd(mergka2_m$N)
+
+ggplot(mergka2_m, aes(x=monthR)) + 
+  geom_line(aes(y=V1, color="blue")) +
+  geom_line(aes(y=N, color="red"))
+```
+Results: \
+- correlation between number of flights and number of USA streams mpnthly = 0.05 not significant \
+- correlation between number of flights and number of global streams = 0.37 not significant \
+
+## Binomial and poisson regression
+We merged 2 datasets (top 2017 and ranking data set). We fitted binomial regression with all features as well as with all their interactions and compared the models by partial deviance test. We tried to find the best model by forward selection in these two cases (with and without interactions). Response=#ofdays for song being in top 200, covariates=features \
+Then we fitted the poisson regression with all covariates as well as with their interactions. By partial deviance test we selected the better one. Response=#ofstreams of a song, covariates=features
+```{r}
+#merging and removing columns
+features <- copy(top17)
+bigdata <- copy(ranks)
+day = c()
+for(i in 1:length(bigdata[,unique(Date)])){
+  day = c(day, i)
+}
+helping02 <- data.table(bigdata[,unique(Date)],day)
+setnames(helping02, 'V1', 'Date')
+bigdata <- merge(bigdata, helping02, by='Date')
+songs <- features[,name]
+setnames(bigdata, 'Track.Name', 'Name')
+setnames(features, 'name', 'Name')
+playroom <- bigdata[Name %in% songs]
+playroom <- merge(playroom,features, by='Name')
+
+head(playroom, n=30)
+
+playroom[,URL:=NULL]
+playroom[,time_signature:=NULL]
+playroom[,id:=NULL]
+
+#BINOMIAL regression
+NinTOPglobal <- playroom[Region=="global"]
+NinTOPglobal <- NinTOPglobal[, .N, by=c("Name", "Artist")]
+NinTOPglobal <- merge(NinTOPglobal,features, by='Name')
+
+NinTOPglobal[,artists:=NULL]
+NinTOPglobal[,time_signature:=NULL]
+NinTOPglobal[,id:=NULL]
+
+# full + full with interactions, F test, plot y vs fitted
+model1 <- glm(cbind(N,rep(371,100)-N)~., data=NinTOPglobal[,-c("Name","Artist")], family="binomial")
+
+model2 <- glm(cbind(N,rep(371,100)-N)~.^2, data=NinTOPglobal[,-c("Name","Artist")], family="binomial")
+
+summary(model1)
+plot(predict(model1, type="response")*371, NinTOPglobal$N)
+
+summary(model2)
+plot(predict(model2, type="response")*371, NinTOPglobal$N)
+
+#partial deviance test model1-2
+1-pchisq(model1$deviance-model2$deviance, length(model2$coefficients)-length(model1$coefficients))
+
+#step selection 1 - full
+null <- formula("cbind(N,rep(371,100)-N) ~ 1")
+full <- formula("cbind(N,rep(371,100)-N) ~ .") 
+modelik_top <- step(glm(null,data=NinTOPglobal[,-c("Name","Artist")], family="binomial"), direction="forward", scope = list(upper=glm(full, data=NinTOPglobal[,-c("Name","Artist")], family="binomial")))
+summary(modelik_top)
+
+plot(predict(modelik_top, type="response")*371, NinTOPglobal$N)
+#partial dev test vs model1
+1-pchisq(modelik_top$deviance-model1$deviance, length(model1$coefficients)-length(modelik_top$coefficients))
+
+#step selection 2 -  full with interactions, plot y vs fitted
+full2 <- formula("cbind(N,rep(371,100)-N) ~ .^2")
+modelik_top2 <- step(glm(null,data=NinTOPglobal[,-c("Name","Artist")], family="binomial"), direction="forward", scope = list(upper=glm(full2, data=NinTOPglobal[,-c("Name","Artist")], family="binomial")))
+summary(modelik_top2)
+
+plot(predict(modelik_top2, type="response")*371, NinTOPglobal$N)
+#partial dev test vs model2
+1-pchisq(modelik_top2$deviance-model2$deviance, length(model2$coefficients)-length(modelik_top2$coefficients))
+
+
+#POISSON regression
+streamy_global <- playroom[Region=="global"]
+streamy_global <- streamy_global[, sum(Streams), by=c("Name", "Artist")]
+streamy_global <- merge(streamy_global,features, by='Name')
+streamy_global[,artists:=NULL]
+streamy_global[,time_signature:=NULL]
+streamy_global[,id:=NULL]
+
+#full + full with interactions
+model3 <- glm(V1~., data=streamy_global[,-c("Name","Artist")], family="poisson")
+summary(model3)
+
+model4 <- glm(V1~.^2, data=streamy_global[,-c("Name","Artist")], family="poisson")
+summary(model4)
+
+1-pchisq(model3$deviance-model4$deviance, length(model4$coefficients)-length(model3$coefficients))
+```
+Results BINOMIAL: \
+-  model1 -  model with all covariates - many significant parameters, but high deviance, y vs fitted not so good \
+-  model2 - model with all interactions -  most of the parameters significant, lower deviance, lower AIC, y vs fitted much better - according to partial deviance test the model is much better \
+- modelik_top - step selection model with all covariates - instrumenatalness and tempo removed, AIC and deviance similar, y vs fitted not so good - acc. to partial deviance test the model is better than one with all covariates - model1 \
+- step selection model with all covariates and their interactions - many significant, AIC and deviance was lower elsewhere, y vs fitted quite good - acc. to partial deviance test the model is worse than one with all covariates and their interactions - model2 \
+- the best model - model 2 - all covariates with all their interactions \
+
+Results POISSON: \
+-  model3 -  model with all covariates - all significant parameters, but high deviance, high AIC \
+-  model4 -  model with all covariates and their interactions - all significant parameters, but high deviance, high AIC - lower then the previous model \
+- according to partial dev test - model 4 better \
+
+## Cross validation
+We did cross validation in binomial regression, we tested the model on first 90 songs and tried to predict the number of days in top 200 to other 10 remaining songs according to their covariates. We picke the best model according to partial dev test.
+We plotted the real values to the fitted ones and compared them in the table.
+```{r}
+#fitting the models
+cross1 <- glm(cbind(N,rep(371,90)-N)~., data=NinTOPglobal[1:90,-c("Name","Artist")], family="binomial")
+cross2 <- glm(cbind(N,rep(371,90)-N)~.^2, data=NinTOPglobal[1:90,-c("Name","Artist")], family="binomial")
+
+summary(cross1)
+summary(cross2)
+
+#partial dev test
+1-pchisq(cross1$deviance-cross2$deviance, length(cross2$coefficients)-length(cross1$coefficients))
+#y vs fitted
+plot(predict(cross2, type="response")*371, NinTOPglobal[1:90]$N)
+
+#comparison of predicted and real values
+plot(predict(cross2, NinTOPglobal[91:100,-c("Name","Artist", "N")], type="response")*371, NinTOPglobal[91:100]$N)
+cbind(real=NinTOPglobal[91:100]$N, predicted=round(predict(cross2, NinTOPglobal[91:100,-c("Name","Artist", "N")], type="response")*371))
+
+#step selection - full
+null_c <- formula("cbind(N,rep(371,90)-N) ~ 1")
+full_c <- formula("cbind(N,rep(371,90)-N) ~ .") 
+cross_top <- step(glm(null_c,data=NinTOPglobal[1:90,-c("Name","Artist")], family="binomial"), direction="forward", scope = list(upper=glm(full_c, data=NinTOPglobal[1:90,-c("Name","Artist")], family="binomial")))
+summary(cross_top)
+
+1-pchisq(cross_top$deviance-cross1$deviance, length(cross1$coefficients)-length(cross_top$coefficients))
+
+#comparison
+cbind(real=NinTOPglobal[91:100]$N, predicted=round(predict(cross_top, NinTOPglobal[91:100,-c("Name","Artist", "N")], type="response")*371))
+
+#step selection - full with interactions
+full_c2 <- formula("cbind(N,rep(371,90)-N) ~ .^2")
+cross_top2 <- step(glm(null_c,data=NinTOPglobal[1:90,-c("Name","Artist")], family="binomial"), direction="forward", scope = list(upper=glm(full_c2, data=NinTOPglobal[1:90,-c("Name","Artist")], family="binomial")))
+summary(cross_top2)
+
+1-pchisq(cross_top2$deviance-cross2$deviance, length(cross2$coefficients)-length(cross_top2$coefficients))
+
+#comparison
+cbind(real=NinTOPglobal[91:100]$N, predicted=round(predict(cross_top2, NinTOPglobal[91:100,-c("Name","Artist", "N")], type="response")*371))
+```
+Results: \
+-  cross2 model the better one, but the prediction did not end up well \
+-  cross_top model better then cross1 model, but the prediction did not end up well \
+-  cross_top2 model better then cross2 model, but the prediction did not end up well \
+
+### Comparing of means 1
+We were comparing means of streams of songs/days in top 200 according to features. We picked few features and devided the songs into 2 groupd according to that feature (eg. danceability >0.5 / <0.5). We tested the normality and put it into the t.test/wilcox.test. We adjusted the pvalues with bonferroni correction.
+```{r}
+#preparation
+streamy_global_mt <- streamy_global[, V1:=V1/371]
+pval <- matrix(0,6,1)
+
+#valence - streams
+valence_h <- streamy_global_mt[valence>=0.5, V1]
+valence_l <- streamy_global_mt[valence<0.5, V1]
+
+boxplot(valence_h)
+boxplot(valence_l)
+
+qqnorm(valence_h)
+qqnorm(valence_l)
+shapiro.test(valence_h)
+shapiro.test(valence_l)
+
+pval[1] <- wilcox.test(valence_h, valence_l)$p.value
+
+#valence - ranks
+valence_h_r <- NinTOPglobal[valence>=0.5, N] 
+valence_l_r <- NinTOPglobal[valence<0.5, N]
+
+boxplot(valence_h_r)
+boxplot(valence_l_r)
+
+qqnorm(valence_h_r)
+qqnorm(valence_l_r)
+shapiro.test(valence_h_r)
+shapiro.test(valence_l_r)
+
+pval[2] <- wilcox.test(valence_h_r, valence_l_r)$p.value
+
+#mode - streams
+mode1 <- streamy_global_mt[mode==1, V1]
+mode0 <- streamy_global_mt[mode==0, V1]
+
+boxplot(mode1)
+boxplot(mode0)
+
+qqnorm(mode1)
+qqnorm(mode0)
+shapiro.test(mode1)
+shapiro.test(mode0)
+
+pval[3] <- wilcox.test(mode1, mode0)$p.value
+
+#mode - ranks
+mode1_r <- NinTOPglobal[mode==1, N] 
+mode0_r <- NinTOPglobal[mode==0, N]
+
+boxplot(mode1_r)
+boxplot(mode0_r)
+
+qqnorm(mode1_r)
+qqnorm(mode0_r)
+shapiro.test(mode1_r)
+shapiro.test(mode0_r)
+
+pval[4] <- wilcox.test(mode1_r, mode0_r)$p.value
+
+#energy - streams
+mean(energy)
+
+energy_h <- streamy_global_mt[energy>=0.66, V1]
+energy_l <- streamy_global_mt[energy<0.66, V1]
+
+boxplot(energy_h)
+boxplot(energy_l)
+
+qqnorm(energy_h)
+qqnorm(energy_l)
+shapiro.test(energy_h)
+shapiro.test(energy_l)
+
+pval[5] <- wilcox.test(energy_h, energy_l)$p.value
+
+#energy - ranks
+energy_h_r <- NinTOPglobal[energy>=0.66, N] 
+energy_l_r <- NinTOPglobal[energy<0.66, N]
+
+boxplot(energy_h_r)
+boxplot(energy_l_r)
+
+qqnorm(energy_h_r)
+qqnorm(energy_l_r)
+shapiro.test(energy_h_r)
+shapiro.test(energy_l_r)
+
+pval[6] <- wilcox.test(energy_h_r, energy_l_r)$p.value
+
+#multiple testing adjustment
+p.adjust(pval, method="bonferroni")
+```
+Results: \
+-  without correction - there was impact of mode on the number of days song is in top 200 \
+-  after bonferroni correction - no impact \
+
+### Comparing of means 2
+We devided the songs into 2 sets according the number of streams/number of days in top 200 - better ones and worse ones. Then we tested if the mean of the features the group of songs have is the same or different. We adjusted the pvalues with bonferroni correction.
+```{r}
+#devision into 2 groups
+streams_up <- streamy_global_mt[V1>=median(V1)]
+streams_down <- streamy_global_mt[V1<median(V1)]
+
+ranks_up <- NinTOPglobal[N>=median(N)]
+ranks_down <- NinTOPglobal[N<median(N)]
+
+pval2 <- matrix(0,8,1)
+
+#danceability
+shapiro.test(ranks_up$danceability)
+shapiro.test(ranks_down$danceability)
+pval2[1] <- wilcox.test(ranks_up$danceability, ranks_down$danceability)$p.value
+
+shapiro.test(streams_up$danceability)
+shapiro.test(streams_down$danceability)
+pval2[2] <- wilcox.test(streams_up$danceability, streams_down$danceability)$p.value
+
+#energy
+shapiro.test(ranks_up$energy)
+shapiro.test(ranks_down$energy)
+pval2[3] <- wilcox.test(ranks_up$energy, ranks_down$energy)$p.value
+
+shapiro.test(streams_up$danceability)
+shapiro.test(streams_down$danceability)
+pval2[4] <- wilcox.test(streams_up$energy, streams_down$energy)$p.value
+
+#valence
+shapiro.test(ranks_up$valence)
+shapiro.test(ranks_down$valence)
+pval2[5] <- t.test(ranks_up$valence, ranks_down$valence)$p.value
+
+shapiro.test(streams_up$valence)
+shapiro.test(streams_down$valence)
+pval2[6] <- t.test(streams_up$valence, streams_down$valence)$p.value
+
+#tempo
+shapiro.test(ranks_up$tempo)
+shapiro.test(ranks_down$tempo)
+pval2[7] <- wilcox.test(ranks_up$tempo, ranks_down$tempo)$p.value
+
+shapiro.test(streams_up$tempo)
+shapiro.test(streams_down$tempo)
+pval2[8] <- wilcox.test(streams_up$tempo, streams_down$tempo)$p.value
+
+#multiple testing adjustment
+p.adjust(pval2, method="bonferroni")
+```
+Results: \
+-  with and without bonferrni correction nothing is significant \
+
+## Load Data: 
+```{r}
+features <- copy(top17)
+bigdata <- copy(daily_ranking)
+day = c()
+for(i in 1:length(bigdata[,unique(Date)])){
+  day = c(day, i)
+}
+helping02 <- data.table(bigdata[,unique(Date)],day)
+setnames(helping02, 'V1', 'Date')
+bigdata <- merge(bigdata, helping02, by='Date')
+
+songs <- features[,name]
+setnames(bigdata, 'Track Name', 'Name')
+setnames(features, 'name', 'Name')
+playroom <- bigdata[Name %in% songs]
+playroom <- merge(playroom,features, by='Name')
+playroom[,URL:=NULL]
+playroom[,artists:=NULL]
+playroom[,time_signature:=NULL]
+playroom[,duration_ms:=NULL]
+playroom[,id:=NULL]
+playroom <- copy(playroom)
+playroom_mini <- copy(playroom)
+playroom_mini[,Position := NULL]
+playroom_mini[,Date := NULL]
+playroom_mini <- playroom_mini[,Streams:=mean(Streams),by=.(Region,Name)]
+supermini <- playroom_mini[,.SD[1],by=.(Name,Streams)]
+supersupermini <- supermini[Region == 'global']
+supmin <- supersupermini
+regions <- unique(supermini[,Region])
+```
+Created a merged data table containing just songs from smaller datatable, however including its parameters. So we have combined data table where is all possible information about 100 songs from top songs 2017. 
+
+
+## Plotting streams in global against parameters: 
+```{r}
+model01 <- lm(Streams ~ danceability, supmin)        
+plot(supmin$danceability,supmin$Streams)
+plot(supmin$valence,supmin$Streams)
+plot(supmin$energy,supmin$Streams)
+plot(supmin$speechiness,supmin$Streams)
+
+hist(playroom[Name=='rockstar' & Region == 'global', Streams],breaks = 30)
+
+```
+The graphs suggest, that there is no obvious relationship between the parameters of the songs and number of streams. 
+
+##Investigating concrete songs (their streams and rankings) and Spotify: 
+```{r}
+##### Believer
+
+believer <- playroom[Name == 'Believer' & Artist == 'Imagine Dragons']
+table(believer[,Region])
+ggplot(believer[Region != 'global' & Region != 'us'], aes(day,Streams,col=Region)) + geom_line()
+ggplot(believer[Region != 'global' & Region != 'us'], aes(day,Position,col=Region)) + geom_line()
+
+believer[Streams>750000 & Region != 'global']
+
+##### Sign of the Times
+
+signs <- playroom[Name == 'Sign of the Times']
+signs[Streams>20000]
+ggplot(signs[Region != 'global' & Region != 'us'], aes(day,Streams,col=Region)) + geom_line()
+
+##### Other songs
+
+havana <- playroom[Name == 'Havana']
+ggplot(havana[Region != 'global' & Region != 'us'], aes(day,Streams,col=Region)) + geom_line()
+malibu <- playroom[Name == 'Malibu']
+ggplot(malibu[Region != 'global' & Region != 'us'], aes(day,Streams,col=Region)) + geom_line()
+ggplot(malibu[Region != 'global' & Region != 'us'], aes(day,Position,col=Region)) + geom_line()
+malibu[day<100]
+
+##### Spotify
+
+helping01 <- bigdata[Region=='global',sum(Streams),by=day]
+setnames(helping01,'V1','count')
+plot(helping01$day,helping01$count)
+
+```
+Some of the graphs are interesting, because they show big jumps in the position or number of streams of particular song. It would be worth of investigation, whether there was some real-world event that influenced state of the song so hard. 
+
+
+
+## Investigating correlation between ranking differences of songs comparing two countries. 
+### Detailed methodology: 
+1. We first looked just at Germany and Slovakia. For each song, we computed the correlation between vectors of changes in ranking for the song for both countries. We counted just the days, where both songs occured in top 200 for the song. For each song we computed p-value of spearman correlation test and then adjuted all the p-values for all the songs by Bonferoni correction. Finally, we computed the ratio of songs which have significant correlation of changes for both the countries. 
+2. Then, we did the same as in 1., but now for all pairs of countries. The output 'super_results' is a list containing outputs for each pair of country. For one pair of country, it contains table with all the songs and their p-values and adjusted p-values and information about rejecting H0. Then it contains the ratio of the songs with significant p-value and then also the investigated pair of countries. 
+3. Then we also plotted the ranking process of some particular songs for some particular pair of regions. 
+```{r}
+##### Slovakia vs. Germany
+
+bigbattle <- playroom[Region %in% c('sk','de')]
+songs <- unique(bigbattle[,Name])
+
+###### debugging window
+#dt <- helpingbattle
+#name <- "1-800-273-8255"
+#reg1 <- 'cz'
+#reg2 <- 'my'
+#View(helping04)
+#get_corr(dt,name,reg1,reg2)
+#####
+
+get_corr <- function(dt,name,reg1,reg2){ # a function that performs spearman test for particular song and for particular pair of countries 
+  helping03 <- dt[Name == name & Artist == dt[Name == name,Artist][1]]
+  lengths <- helping03[,length(Region),by=day]
+  lengths <- lengths[V1 == 2]
+  dayyy <- lengths[,day]
+  helping04 <- helping03[day %in% dayyy]
+  vect1 <- helping04[Region==reg1,Position]
+  vect2 <- helping04[Region == reg2,Position]
+  if(length(vect1)>1 & length(vect1)==length(vect2)){
+    p_vall <- cor.test(vect1,vect2,method = 'spearman')$p.value
+    return(c(name,p_vall))
+  }
+  return(c(NA,NA))
+}
+
+plot_corr <- function(dt, name, reg1, reg2){ # the function that plots progres of a song for the pair of regions
+  helping05 <- dt[Region %in% c(reg1,reg2)]
+  helping03 <- helping05[Name == name]
+  lengths <- helping03[,length(Region),by=day]
+  lengths <- lengths[V1 == 2]
+  dayyy <- lengths[,day]
+  helping04 <- helping03[day %in% dayyy]
+  ggplot(helping04, aes(day,Position,col=Region)) + geom_line() + labs(title = name)
+}
+
+plot_corr(playroom,'Stay (with Alessia Cara)','cz','my')
+plot_corr(playroom,'Rockabye (feat. Sean Paul & Anne-Marie)','cz','my')
+plot_corr(playroom,'Chantaje','ch','bo')
+plot_corr(playroom,'Rockabye (feat. Sean Paul & Anne-Marie)','ch','mx')
+plot_corr(playroom,'I Feel It Coming','ca','global')
+
+
+results <- c()
+for(i in songs){
+  results <- rbind(results, get_corr(bigbattle,i,'de','sk'))
+}
+results <- as.data.table(results)
+setnames(results, c('V1','V2'),c('Name','p.value'))
+
+
+
+plot_corr(playroom,'Bank Account','de','sk')
+plot_corr(playroom,'Believer','de','sk')
+plot_corr(playroom,'Something Just Like This','de','sk')
+plot_corr(playroom,'Don\'t Let Me Down','de','sk')
+plot_corr(playroom,'Fake Love','de','sk')
+plot_corr(playroom,'Redbone','de','sk')
+results <- na.omit(results)
+results$p.value <- as.numeric(results$p.value)
+results
+results[,'adj.pval' := p.value*length(p.value)]
+results[,'Reject H0' := adj.pval<0.01]
+corr_meas <- results[,sum(`Reject H0`)/length(`Reject H0`)]
+
+
+###### Multi country comparison
+
+##### debugging window
+reg1 <- 'lt'
+reg2 <- 'mx'
+i <- "Let Me Love You"
+songs[1]
+#####
+get_corrs_countries <- function(reg1,reg2){ # a function that makes a summary table for specific pair of countries for all the songs and also computes the similarity measure between those two countries. 
+  helpingbattle <- playroom[Region %in% c(reg1,reg2)]
+  songs <- unique(helpingbattle[,Name])
+  results <- array(dim = c(length(songs),2))
+  ach <- 1
+  for(i in songs){
+    flush.console()
+    print(ach)
+    results[ach,] <- get_corr(helpingbattle,i,reg1,reg2)
+    ach <- ach+1
+  }
+  results <- as.data.table(results)
+  setnames(results, c('V1','V2'),c('Name','p.value'))
+  results <- na.omit(results)
+  results$p.value <- as.numeric(results$p.value)
+  results[,'adj.pval' := p.value*length(p.value)]
+  results[, 'Reject H0' := adj.pval<0.01]
+  corr_meas <- results[,sum(`Reject H0`)/length(`Reject H0`)]
+  return(list(results,corr_meas,c(reg1,reg2)))
+}
+
+get_corrs_countries('us','nz')
+
+##### A for cycle that makes the 'super_results' list of all possible pairs of countries. 
+pairs_of_countries <- subsets(length(regions), 2, regions)
+pairs_of_countries <- as.data.table(pairs_of_countries)
+
+load('data/super_results.RData')
+
+##### DANGEROUS PART!!! This is for computing the super_results list. If you want to run it, uncomment it. The process will take ~1hour on regularly quick notebook. 
+
+#super_results <-  vector(mode = "list", length = length(pairs_of_countries[,V1]))
+#for(i in 1:length(pairs_of_countries[,V1])) {
+#  flush.console()
+#  print(paste0('i= ', i))
+#  super_results[[i]] <- get_corrs_countries(pairs_of_countries[i,V1],pairs_of_countries[i,V2])
+#}
+
+#####
+
+#save('super_results',file = 'super_results.RData')
+
+#### some further investigations and playing with data. Crating a 'table_of_similarities' table. 
+super_results[[1]]
+pairs_of_countries[723]
+
+#save(super_results, file= 'dolezite.RData')
+
+#View(super_results)
+super_results[[1]][[1]][5,]
+
+table_of_similarities <- matrix(nrow = 1431, ncol = 4)
+for(i in 1:1431){
+  table_of_similarities[i,] <- c(super_results[[i]][[2]],super_results[[i]][[3]],i)
+}
+# View(table_of_similarities)
+table_of_similarities <- as.data.table(table_of_similarities)
+table_of_similarities <- setorderv(table_of_similarities, cols = 'V1',order = -1)
+#View(super_results[[410]][[1]][,3])
+#View(super_results[[298]][[3]])
+#View(super_results[[54]][[1]])
+super_results[[54]][[3]]
+
+### investigating which pair of countries contain the lowest p-value ever. 
+ojhla <- 1
+for(i in 1:1431){
+  if(min(super_results[[i]][[1]][,3])<min(super_results[[ojhla]][[1]][,3])) {
+    ojhla <- i
+  }
+}
+ojhla
+
+```
+From the table it is clear, that for most of the countries, there is a large ratio of songs, that are statistically significantly similar for the countries. In other words, if we reject H0 for some song and some pair of countries, it means, that the progresses of its ranking in one country and in the second one behave similarly. So, for most of the pairs of countries, there are many songs whose rankings behave similarly. 
+The table 'table_of_similarities' summarizes this ratios. For each pair of countires there is a ratio of rejected H0`s. So, for example for Czech republic and Malaysia, all the songs have significantly similar behavior. 
+Some of the p-values are extremely low. The lowest p-value is 5*10^(-296) for the song "I Feel It Coming" while comparing regions 'ca' and 'global'. 
+There is place for further investigations: It would be now possible to find out, whether the countries, that are close to each other have generally higher similarity measure than the contries that are far from each other. 
